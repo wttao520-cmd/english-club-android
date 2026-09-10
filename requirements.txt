@@ -1,0 +1,6 @@
+# 桌面预览所需（打包 APK 由 buildozer.spec 中的 requirements 决定）
+kivy==2.3.0
+requests>=2.25
+
+# 可选：生成打包用的中文字体子集
+fonttools>=4.40

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Buildozer / Android
+.buildozer/
+build/
+bin/
+*.apk
+*.aab
+.gradle/
+
+# 本地数据与日志
+.kivy/
+*.log
+
+# 系统
+.DS_Store

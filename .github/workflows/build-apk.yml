@@ -1,0 +1,80 @@
+name: Build Android APK
+
+# 云端打包：本机磁盘不足或没有 JDK 17 时，用 GitHub Actions 免费构建
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "CPU 架构（arm64-v8a 覆盖绝大多数现代手机）"
+        required: true
+        default: "arm64-v8a"
+        type: choice
+        options:
+          - arm64-v8a
+          - arm64-v8a, armeabi-v7a
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android 2>/dev/null || true
+          df -h /
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git zip unzip autoconf libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
+            python3-pip
+          pip install --upgrade pip
+          pip install buildozer cython
+
+      # 缓存 Android SDK/NDK/构建产物：第二次构建从 40 分钟降到约 5 分钟
+      - name: Cache buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            buildozer-${{ runner.os }}-
+
+      - name: Build debug APK
+        run: |
+          # 允许通过手动输入覆盖架构，减少等待时间
+          if [ -n "${{ github.event.inputs.arch }}" ]; then
+            sed -i "s|^android.archs = .*|android.archs = ${{ github.event.inputs.arch }}|" buildozer.spec
+          fi
+          grep "^android.archs" buildozer.spec
+          yes | buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: english-club-debug-apk
+          path: bin/*.apk
+          if-no-files-found: error
+
+      - name: Show result
+        if: always()
+        run: ls -la bin/ 2>/dev/null || echo "bin/ 下没有产物，请查看上方日志"
