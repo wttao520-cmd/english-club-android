@@ -20,8 +20,10 @@ version = 1.0.0
 # 依赖：Python3 + Kivy + requests（AI 与在线发音）；sqlite3 由 Python 内置提供
 requirements = python3,kivy==2.3.0,requests
 
-# 启动时的界面方向：fullsensor 支持手机竖屏、平板横屏自动切换
-orientation = fullsensor
+# 屏幕方向：跟随系统重力感应四向自由旋转（手机竖屏、平板横屏都适配）
+# 合法值仅：landscape / portrait / landscape-reverse / portrait-reverse / all
+# 注意：不可写 fullSensor 或 fullsensor，buildozer 会校验失败
+orientation = all
 
 # 状态栏可见（不隐藏，避免打字时看不到时间与通知）
 fullscreen = 0

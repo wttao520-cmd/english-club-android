@@ -22,13 +22,13 @@ jobs:
     timeout-minutes: 300
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -50,7 +50,7 @@ jobs:
 
       # 缓存 Android SDK/NDK/构建产物：第二次构建从 40 分钟降到约 5 分钟
       - name: Cache buildozer
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.buildozer
@@ -59,6 +59,24 @@ jobs:
           restore-keys: |
             buildozer-${{ runner.os }}-
 
+      - name: Validate spec
+        run: |
+          # 提前校验 spec，出错时快速失败，避免白等几十分钟
+          python3 - <<'PY'
+          import configparser
+          valid = {"landscape", "portrait", "landscape-reverse",
+                   "portrait-reverse", "all"}
+          c = configparser.ConfigParser()
+          c.read("buildozer.spec")
+          orients = [o.strip() for o in
+                     c.get("app", "orientation", fallback="landscape").split(",")]
+          bad = [o for o in orients if o not in valid]
+          assert not bad, f"orientation 非法值: {bad}，合法值: {sorted(valid)}"
+          for k in ("title", "package.name", "version"):
+              assert c.get("app", k, fallback=""), f"{k} 缺失"
+          print("spec 校验通过，orientation =", orients)
+          PY
+
       - name: Build debug APK
         run: |
           # 允许通过手动输入覆盖架构，减少等待时间
@@ -66,10 +84,10 @@ jobs:
             sed -i "s|^android.archs = .*|android.archs = ${{ github.event.inputs.arch }}|" buildozer.spec
           fi
           grep "^android.archs" buildozer.spec
-          yes | buildozer -v android debug
+          yes 2>/dev/null | buildozer -v android debug
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: english-club-debug-apk
           path: bin/*.apk
