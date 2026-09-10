@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       arch:
-        description: "CPU 架构（arm64-v8a 覆盖绝大多数现代手机）"
+        description: "CPU 架构（默认 arm64-v8a；老设备选第二项）"
         required: true
         default: "arm64-v8a"
         type: choice
@@ -13,6 +13,8 @@ on:
           - arm64-v8a
           - arm64-v8a, armeabi-v7a
   push:
+    branches:
+      - main
     tags:
       - "v*"
 

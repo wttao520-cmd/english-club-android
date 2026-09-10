@@ -32,7 +32,9 @@ android.permissions = INTERNET
 
 android.api = 34
 android.minapi = 23
-android.archs = arm64-v8a, armeabi-v7a
+# 默认只编 arm64-v8a（覆盖 2016 年后的绝大多数手机，构建快一倍）。
+# 需要兼容老设备时，在 Actions 手动运行时选择 "arm64-v8a, armeabi-v7a"。
+android.archs = arm64-v8a
 
 android.allow_backup = True
 android.accept_sdk_license = True
