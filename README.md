@@ -104,7 +104,18 @@ buildozer -v android release    # 发布版（需签名配置）
 `/data/data/org.sentenceclub.englishclub/files`（应用私有目录）。
 卸载即清除，重要进度请从设置页导出数据库。
 
-## 七、与桌面版的差异
+## 七、打包踩坑记录（重要，改 spec 前先看）
+
+| 报错 | 根因 | 解法 |
+| --- | --- | --- |
+| `"fullsensor" is not a valid value for "orientation"` | buildozer 合法值仅 `landscape`/`portrait`/`landscape-reverse`/`portrait-reverse`/`all` | 写 `all`（四向自由旋转） |
+| `call to undeclared function 'preadv' / 'pwritev'` | 这两个函数 Android **API 24+** 才提供，`minapi=23` 时头文件不声明 | `android.minapi = 24` |
+| （预期会出现）Kivy 编译期 C-API 报错 | 默认拉最新 Python 3.14，而 Kivy 2.3.0 只支持到 3.12 | `python3==3.11.9` 锁定版本 |
+
+两个硬约束已写进 `.github/workflows/build-apk.yml` 的 **Validate spec** 步骤，
+改坏配置会在几秒内失败，不用等半小时才发现。
+
+## 八、与桌面版的差异
 
 | | 桌面版（PyQt5） | 安卓版（Kivy） |
 | --- | --- | --- |
