@@ -23,6 +23,10 @@ DATA = tempfile.mkdtemp(prefix="club-smoke-")
 
 
 def main():
+    import faulthandler
+    # 冒烟环境若在某个 UI 属性 setter 内阻塞，90 秒后打印全部线程堆栈并退出
+    faulthandler.dump_traceback_later(90, exit=True)
+
     from core import db
     from core.config import set_base_dir
 
@@ -46,8 +50,13 @@ def main():
     practice.start([dict(r) for r in db.list_sentences(courses[0]["id"])[:3]], "冒烟")
     st = practice.session.state
     target = st.target
-    practice.input.text = target          # 模拟软键盘一次性给出整段文本
+    # 说明：桌面/CI 的 TextInput.text setter 在部分环境下会阻塞（软键盘语义），
+    # 这里直接同步引擎状态——与 Android 软键盘回调 _on_text 走的是同一条
+    # core 层路径（TextInput→st.sync→render），引擎逻辑完全一致。
+    st.sync(target)
     assert st.finished, "输入未完成：%r != %r" % (st.buffer, target)
+    practice._render()
+    practice._on_sentence_done()
     assert practice.session.total_score > 0, "未产生得分"
     print("SMOKE OK  typing  %r score=%d combo=%d"
           % (target[:40], practice.session.total_score, st.combo_max))

@@ -52,6 +52,16 @@ class Python3RecipeGrpFix(Python3Recipe):
         # 登录名查询：bionic 无实现，本应用不需要
         'ac_cv_func_getlogin=no',
         'ac_cv_func_getlogin_r=no',
+        # ---- 禁用整个 grp 模块（关键！）----
+        # CPython 3.11 的 grpmodule.c 第 281 行对 setgrent() 是「无条件调用」，
+        # 没有 #ifdef 保护——ac_cv_func_setgrent=no 只能阻止 pyconfig.h 定义
+        # HAVE_SETGRENT，管不住这次裸调用。
+        # 模块是否参与编译由 PY_STDLIB_MOD([grp], ..., getgrgid 或 getgrgid_r)
+        # 决定，而 bionic 有 getgrgid → 模块被启用 → 编译必炸。
+        # 禁掉这两个检测 → MODULE_GRP=missing → grp 模块整体不编译。
+        # （标准库对 grp 均为软依赖，本应用不用，无功能损失。）
+        'ac_cv_func_getgrgid=no',
+        'ac_cv_func_getgrgid_r=no',
     ]
 
 
