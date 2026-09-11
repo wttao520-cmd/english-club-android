@@ -111,6 +111,7 @@ buildozer -v android release    # 发布版（需签名配置）
 | `"fullsensor" is not a valid value for "orientation"` | buildozer 合法值仅 `landscape`/`portrait`/`landscape-reverse`/`portrait-reverse`/`all` | 写 `all`（四向自由旋转） |
 | `call to undeclared function 'preadv' / 'pwritev'` | 这两个函数 Android **API 24+** 才提供，`minapi=23` 时头文件不声明 | `android.minapi = 24` |
 | （预期会出现）Kivy 编译期 C-API 报错 | 默认拉最新 Python 3.14，而 Kivy 2.3.0 只支持到 3.12 | `python3==3.11.9` 锁定版本 |
+| `python3 should have same version as hostpython3, 3.11.9 != 3.14.2` | 只锁了 `python3`，忘了 `hostpython3`（交叉编译用的宿主机 Python）仍是默认 3.14.2 | 两者**同时、同版本**锁定：`python3==3.11.9,hostpython3==3.11.9` |
 
 两个硬约束已写进 `.github/workflows/build-apk.yml` 的 **Validate spec** 步骤，
 改坏配置会在几秒内失败，不用等半小时才发现。
