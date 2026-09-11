@@ -39,12 +39,8 @@ from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 _step("kivy ok")
 
-from core import db
-from core.context import AppContext
-from core.courses_builtin import seed
-
-_step("core ok")
-
+# 注意：core/* 的 import 不能放在模块顶层——import 链会触发 app_dir() 建目录，
+# 且顶层异常无法被入口 try 捕获（Android 上表现为静默闪退）。统一在 _run() 内。
 from ui.library_screens import (CoursesScreen, ImportScreen, ReviewScreen,
                                 StatsScreen)
 from ui.phonics_screen import PhonicsScreen
@@ -156,6 +152,9 @@ class EnglishClubApp(App):
         from ui.theme import FONT_NAME
         self.font_name = FONT_NAME
 
+        from core import db
+        from core.context import AppContext
+        from core.courses_builtin import seed
         self.ctx = AppContext(base)
         db.init_db()
         seed()
@@ -208,6 +207,7 @@ class EnglishClubApp(App):
 
     # ------------------------------------------------------------ 练习入口
     def start_course(self, course_id, mode=None):
+        from core import db
         n = int(self.ctx.config.get("lesson_size", 10)) or 10
         rows = [dict(r) for r in db.due_course_cards(course_id, n)]
         if not rows:
@@ -287,9 +287,18 @@ def _show_crash_screen(tb_text):
         pass
 
 
+def _run():
+    """core 依赖统一在此 import：出错会被入口 try 捕获并显示崩溃屏。"""
+    from core import db
+    from core.context import AppContext
+    from core.courses_builtin import seed
+    _step("core ok")
+    main()
+
+
 if __name__ == "__main__":
     try:
-        main()
+        _run()
     except Exception:
         import traceback
         tb = traceback.format_exc()

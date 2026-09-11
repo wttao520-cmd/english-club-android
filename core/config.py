@@ -32,9 +32,20 @@ def set_base_dir(path):
 
 
 def app_dir():
-    path = _BASE_DIR or os.path.join(os.path.expanduser("~"), "." + APP_NAME)
-    os.makedirs(path, exist_ok=True)
-    return path
+    global _BASE_DIR
+    if _BASE_DIR is None:
+        # Android（p4a）：bootstrap 设置 ANDROID_APP_PATH=/data/user/0/<pkg>/files。
+        # 不能指望调用方先 set_base_dir——main.py 顶层 import core.db 时就会
+        # 调用本函数（DB_PATH = app_dir()/app.db），此时 build() 还没执行；
+        # 而 Android 上 HOME=/，桌面分支会去创建 /data/.english_club 直接崩。
+        env = os.environ.get("ANDROID_APP_PATH")
+        if env:
+            _BASE_DIR = env
+        else:
+            _BASE_DIR = os.path.join(os.path.expanduser("~"),
+                                     "." + APP_NAME)
+    os.makedirs(_BASE_DIR, exist_ok=True)
+    return _BASE_DIR
 
 
 class Config(object):
