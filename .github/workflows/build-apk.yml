@@ -156,7 +156,11 @@ jobs:
           bad = []
           for name in sos:
               d = z.read(name)
-              assert d[:4] == b"\x7fELF", name
+              if d[:4] != b"\x7fELF":
+                  # p4a 把 Python 代码包打成 tar 并命名为 libpybundle.so 放入 lib/，
+                  # 运行时由 PythonUtil.unpackPyBundle 解包，不是 ELF、不参与 mmap，无需对齐
+                  print("SKIP", name, "(非 ELF: p4a python bundle tar)")
+                  continue
               assert d[4] == 2, f"{name}: 非 64 位 ELF"
               phoff = struct.unpack_from("<Q", d, 0x20)[0]
               phentsize = struct.unpack_from("<H", d, 0x36)[0]
