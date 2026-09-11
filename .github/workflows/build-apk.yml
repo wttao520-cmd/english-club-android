@@ -42,7 +42,12 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android 2>/dev/null || true
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup \
+            /usr/share/swift /opt/microsoft /usr/lib/jvm/temurin-8-jdk-amd64 \
+            /usr/lib/jvm/temurin-11-jdk-amd64 /usr/lib/jvm/temurin-21-jdk-amd64 \
+            /usr/lib/jvm/temurin-25-jdk-amd64 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
           df -h /
 
       - name: Install system dependencies
@@ -106,21 +111,29 @@ jobs:
             sed -i "s|^android.archs = .*|android.archs = ${{ github.event.inputs.arch }}|" buildozer.spec
           fi
           grep "^android.archs" buildozer.spec
+          df -h /
 
-          # 日志完整保存，失败时只打印关键行（完整日志几十 MB，直接打印会被截断）
+          # 日志完整保存；失败时打印关键行。
+          # 注意 PIPESTATUS：管道是 yes|buildozer|tee 三段，
+          #   [0]=yes(被 SIGPIPE 杀死恒为 141)，[1]=buildozer 才是真正要的退出码
           set +e
           yes 2>/dev/null | buildozer -v android debug 2>&1 | tee build.log
-          code=${PIPESTATUS[0]}
+          code=${PIPESTATUS[1]}
           set -e
+          echo "===== buildozer exit code = $code ====="
+          df -h /
 
           if [ "$code" -ne 0 ]; then
             echo ""
-            echo "########## 关键错误摘要（从 build.log 提取） ##########"
-            grep -n -iE "error:|fatal error|error \[|Command failed|Build failed|Buildozer failed|Exception|Traceback" build.log \
-              | grep -viE "ignored|warning" | tail -40
+            echo "########## 关键错误摘要 ##########"
+            grep -n -iE "error:|fatal error|error \[|Command failed|Build failed|Buildozer failed|Error compiling|FAILURE:|No space left|not found|Exception in thread" build.log \
+              | grep -viE "ignored|warning|test_|_exceptions|_test|\.pxi|\.py'|fake_" | tail -35
             echo "########## 摘要结束，完整日志见 Artifacts: build-log ##########"
             exit "$code"
           fi
+
+          echo "===== bin/ 产物 ====="
+          ls -la bin/
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
