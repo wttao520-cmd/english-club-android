@@ -18,7 +18,11 @@ source.exclude_dirs = tools,.github,__pycache__,.git,build,.buildozer,bin
 version = 1.0.0
 
 # 依赖：Python3 + Kivy + requests（AI 与在线发音）；sqlite3 由 Python 内置提供
-requirements = python3,kivy==2.3.0,requests
+# 必须锁定 Python 3.11：
+#   1) 不锁会拉到最新的 Python 3.14，其 Python/remote_debugging.c 用了 preadv/pwritev，
+#      在 minapi<24 时头文件里未声明，编译直接失败（p4a 自带的 3.14 补丁没覆盖这里）；
+#   2) Kivy 2.3.0 官方只支持到 Python 3.12，用 3.14 大概率在编译 Kivy 时因 C-API 变更再崩。
+requirements = python3==3.11.9,kivy==2.3.0,requests
 
 # 屏幕方向：跟随系统重力感应四向自由旋转（手机竖屏、平板横屏都适配）
 # 合法值仅：landscape / portrait / landscape-reverse / portrait-reverse / all
@@ -31,7 +35,10 @@ fullscreen = 0
 android.permissions = INTERNET
 
 android.api = 34
-android.minapi = 23
+# minapi 必须 >= 24：Android 的 preadv/pwritev 自 API 24 才提供（= Android 7.0，2016 年），
+# 低于 24 时头文件不声明这两个函数，编译 Python 会报 implicit function declaration。
+# 24 仍覆盖 99% 以上的在役设备。
+android.minapi = 24
 # 默认只编 arm64-v8a（覆盖 2016 年后的绝大多数手机，构建快一倍）。
 # 需要兼容老设备时，在 Actions 手动运行时选择 "arm64-v8a, armeabi-v7a"。
 android.archs = arm64-v8a

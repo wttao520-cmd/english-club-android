@@ -76,7 +76,15 @@ jobs:
           assert not bad, f"orientation 非法值: {bad}，合法值: {sorted(valid)}"
           for k in ("title", "package.name", "version"):
               assert c.get("app", k, fallback=""), f"{k} 缺失"
-          print("spec 校验通过，orientation =", orients)
+          # minapi<24 时 Android 头文件不声明 preadv/pwritev，编译 Python 必失败
+          minapi = int(c.get("app", "android.minapi", fallback="23"))
+          assert minapi >= 24, f"android.minapi={minapi}，必须 >= 24"
+          # 不锁定版本会拉到 Python 3.14，与 Kivy 2.3.0 不兼容
+          reqs = c.get("app", "requirements", fallback="")
+          assert "python3==" in reqs, "requirements 必须锁定 python3 版本"
+          print("spec 校验通过")
+          print("  orientation =", orients, "| minapi =", minapi)
+          print("  requirements =", reqs)
           PY
 
       - name: Build debug APK
