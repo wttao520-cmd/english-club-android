@@ -71,6 +71,8 @@ jobs:
           # 提前校验 spec，出错时快速失败，避免白等几十分钟
           python3 - <<'PY'
           import configparser
+          import re
+
           valid = {"landscape", "portrait", "landscape-reverse",
                    "portrait-reverse", "all"}
           c = configparser.ConfigParser()
