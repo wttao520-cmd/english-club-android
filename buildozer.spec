@@ -42,6 +42,12 @@ android.api = 34
 # 低于 24 时头文件不声明这两个函数，编译 Python 会报 implicit function declaration。
 # 24 仍覆盖 99% 以上的在役设备。
 android.minapi = 24
+
+# 必须显式锁定 NDK：不锁时 buildozer 会拉最新的 r28c，其 clang 自 16 起把
+# “函数指针类型不兼容”由警告提升为默认错误，Kivy 的 C 扩展（如 cgl_gl）会编译失败。
+# r25b 使用 clang 14，处于该变更之前，是 p4a 生态中验证最充分的版本。
+android.ndk = 25b
+
 # 默认只编 arm64-v8a（覆盖 2016 年后的绝大多数手机，构建快一倍）。
 # 需要兼容老设备时，在 Actions 手动运行时选择 "arm64-v8a, armeabi-v7a"。
 android.archs = arm64-v8a
