@@ -135,6 +135,27 @@ jobs:
           echo "===== bin/ 产物 ====="
           ls -la bin/
 
+          # Android 15+/16 的 16KB 页设备校验：所有 .so 的 LOAD 段对齐必须 >= 16KB
+          echo "===== 16KB page alignment check ====="
+          mkdir -p apkcheck && cd apkcheck
+          unzip -o -q ../bin/*.apk "lib/*"
+          READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          fail=0
+          for so in lib/arm64-v8a/*.so; do
+            align=$("$READELF" -lW "$so" | awk '/LOAD/ {print $NF; exit}')
+            if [ "$align" != "0x4000" ] && [ "$align" != "0x10000" ]; then
+              echo "FAIL: $so LOAD align=$align (需要 0x4000=16KB)"
+              fail=1
+            else
+              echo "OK:   $so align=$align"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "存在 4KB 对齐的 .so，在 Android 15+/16 16KB 页设备上会闪退！"
+            exit 1
+          fi
+          echo "全部 .so 满足 16KB 对齐"
+
       - name: Upload APK
         uses: actions/upload-artifact@v5
         with:

@@ -43,10 +43,13 @@ android.api = 34
 # 24 仍覆盖 99% 以上的在役设备。
 android.minapi = 24
 
-# 显式锁定 NDK 版本：不锁时 buildozer 会下载较新的 r28c，新 clang 对旧代码更严格
-# （如把更多告警升级为错误）。r25b 是 p4a 生态中验证最充分、踩坑最少的版本，
-# 实测可与下面 android.api=34 正常配合编译。
-android.ndk = 25b
+# 显式锁定 NDK r28c（p4a 推荐上限，日志中 buildozer 亦提示 28c）。
+# 关键原因：Android 15+/16 的 16KB 内存页设备要求 .so 按 16KB 对齐，
+# NDK r27 起默认开启（-Wl,-z,max-page-size=16384）；r25b 产出 4KB 对齐，
+# 在 16KB 设备上 dlopen libpython 即失败 → 启动闪退。
+# （历史教训：曾因误判「clang 严格化导致 Kivy 编译失败」降级到 r25b，
+#  真实根因是 grp 函数缺失，与 NDK 版本无关。）
+android.ndk = 28c
 
 # 默认只编 arm64-v8a（覆盖 2016 年后的绝大多数手机，构建快一倍）。
 # 需要兼容老设备时，在 Actions 手动运行时选择 "arm64-v8a, armeabi-v7a"。
