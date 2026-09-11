@@ -231,12 +231,19 @@ class PracticeScreen(Screen):
             self._mode = mode
             name = dict((v, k) for k, v in MODES).get(mode, "句子模式")
             self.mode_spin.text = name
+        self._switching = True   # 清空输入框期间屏蔽 _on_text
         self.session = Session(list(sentences), title)
         self.input.text = ""
+        self._switching = False
         self._next_sentence()
 
     def _next_sentence(self):
+        # 清空输入框会同步触发 _on_text("")，若旧 state 处于 finished 会被
+        # 误判为再次完成 → 同一句重复结算 + 再调度一个 auto_next（前进两步）。
+        # _switching 屏蔽 + commit 幂等（engine 层）双保险。
+        self._switching = True
         self.input.text = ""
+        self._switching = False
         st = self.session.next()
         if st is None:
             self._finish_session()
@@ -283,6 +290,8 @@ class PracticeScreen(Screen):
 
     # ------------------------------------------------------------ 输入
     def _on_text(self, instance, value):
+        if getattr(self, "_switching", False):
+            return   # 程序性清空/切换，非用户输入
         st = self.session.state if self.session else None
         if st is None:
             return
@@ -337,8 +346,14 @@ class PracticeScreen(Screen):
             self._next_sentence()
 
     def _manual_next(self, *a):
-        if self.session and self.session.state and self.session.state.finished:
+        st = self.session.state if self.session else None
+        if st is not None and st.finished:
             self._next_sentence()
+        elif self.session is not None and st is not None:
+            # 给出可见反馈，避免“点了没反应”的困惑
+            self.rating_lbl.text = ("[color=%s]先完成当前句子，或用「跳过」[/color]"
+                                    % MUTED)
+            self._focus_input()
         else:
             self._focus_input()
 
@@ -352,8 +367,13 @@ class PracticeScreen(Screen):
     def _skip(self, *a):
         if self.session and self.session.state:
             import time
-            self.session.state.buffer = self.session.state.target
-            self.session.state.finished_at = time.time()
+            st = self.session.state
+            st.buffer = st.target
+            # 从未输入过的句子：把时间窗补齐，避免 wpm/耗时异常
+            if st.started_at is None:
+                st.started_at = time.time() - 0.001
+            st.skipped = True   # 结算时 rating=Again、score=0（见 engine.py）
+            st.finished_at = time.time()
             self._on_sentence_done()
 
     def _speak(self, *a):

@@ -34,6 +34,7 @@ class TypingState(object):
         self.started_at = None
         self.finished_at = None
         self.practiced_any = False
+        self.skipped = False
 
     # ---------------------------------------------------------- 状态
     @property
@@ -116,7 +117,11 @@ class TypingState(object):
 
     @property
     def wpm(self):
-        return (len(self.target) / 5.0) / (self.duration / 60.0)
+        # 未输入任何字符（如直接跳过）时 duration=0，必须返回 0 而不是除零
+        d = self.duration
+        if d <= 0:
+            return 0.0
+        return (len(self.target) / 5.0) / (d / 60.0)
 
     @property
     def accuracy(self):
@@ -126,9 +131,13 @@ class TypingState(object):
 
     @property
     def rating(self):
+        if self.skipped:
+            return 0   # 跳过计 Again，SRS 会重新安排复习
         return rate(self.errors, self.backspaces)
 
     def score(self):
+        if self.skipped:
+            return 0   # 跳过不得分
         base = len(self.target) * 10
         bonus = self.combo_max * 5 + (200 if self.rating == 5 else 0)
         penalty = self.errors * 20
@@ -179,10 +188,13 @@ class Session(object):
         return self.index >= self.total - 1 and self.state is not None and self.state.finished
 
     def commit_current(self):
-        """结算当前句子，返回结算字典。"""
+        """结算当前句子，返回结算字典。幂等：同一句只结算一次。"""
         st = self.state
         if st is None or not st.finished:
             return None
+        if getattr(st, "committed", False):
+            return None   # 防重入：auto_next 清空输入框时会二次触发
+        st.committed = True
         st.finish()
         r = {
             "sentence": self.current,
