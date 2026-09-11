@@ -111,6 +111,12 @@ jobs:
             sed -i "s|^android.archs = .*|android.archs = ${{ github.event.inputs.arch }}|" buildozer.spec
           fi
           grep "^android.archs" buildozer.spec
+
+          # NDK 版本变更后必须清除旧 dist：p4a 匹配 dist 不看 NDK 版本，
+          # 会直接复用旧 NDK 编译的产物（例如 r25b 的 4KB 对齐 .so）。
+          # 清除后 p4a 用当前 NDK 全量重编（首次约 30~40 分钟）。
+          rm -rf .buildozer/android/platform/build-arm64-v8a
+          rm -rf ~/.buildozer/android/platform/android-ndk-r25b
           df -h /
 
           # 日志完整保存；失败时打印关键行。
@@ -135,26 +141,42 @@ jobs:
           echo "===== bin/ 产物 ====="
           ls -la bin/
 
-          # Android 15+/16 的 16KB 页设备校验：所有 .so 的 LOAD 段对齐必须 >= 16KB
+          # Android 15+/16 的 16KB 页设备校验：每个 .so 的最大 PT_LOAD p_align
+          # 必须 >= 0x4000 (16KB)。用 Python 标准库直接解析 ELF，不依赖外部工具。
           echo "===== 16KB page alignment check ====="
-          mkdir -p apkcheck && cd apkcheck
-          unzip -o -q ../bin/*.apk "lib/*"
-          READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          fail=0
-          for so in lib/arm64-v8a/*.so; do
-            align=$("$READELF" -lW "$so" | awk '/LOAD/ {print $NF; exit}')
-            if [ "$align" != "0x4000" ] && [ "$align" != "0x10000" ]; then
-              echo "FAIL: $so LOAD align=$align (需要 0x4000=16KB)"
-              fail=1
-            else
-              echo "OK:   $so align=$align"
-            fi
-          done
-          if [ "$fail" -ne 0 ]; then
-            echo "存在 4KB 对齐的 .so，在 Android 15+/16 16KB 页设备上会闪退！"
-            exit 1
-          fi
-          echo "全部 .so 满足 16KB 对齐"
+          python3 - <<'PY'
+          import glob, struct, zipfile
+
+          apk = sorted(glob.glob("bin/*.apk"))[0]
+          z = zipfile.ZipFile(apk)
+          sos = [n for n in z.namelist()
+                 if n.startswith("lib/") and n.endswith(".so")]
+          assert sos, "APK 中没有 .so"
+
+          bad = []
+          for name in sos:
+              d = z.read(name)
+              assert d[:4] == b"\x7fELF", name
+              assert d[4] == 2, f"{name}: 非 64 位 ELF"
+              phoff = struct.unpack_from("<Q", d, 0x20)[0]
+              phentsize = struct.unpack_from("<H", d, 0x36)[0]
+              phnum = struct.unpack_from("<H", d, 0x38)[0]
+              best = 0
+              for i in range(phnum):
+                  off = phoff + i * phentsize
+                  if struct.unpack_from("<I", d, off)[0] == 1:  # PT_LOAD
+                      align = struct.unpack_from("<Q", d, off + 0x30)[0]
+                      best = max(best, align)
+              ok = best >= 0x4000
+              print(("OK  " if ok else "FAIL"), name, hex(best))
+              if not ok:
+                  bad.append(name)
+
+          if bad:
+              raise SystemExit(
+                  f"{len(bad)} 个 .so 不是 16KB 对齐，Android 15+/16 设备会闪退！")
+          print(f"全部 {len(sos)} 个 .so 满足 16KB 对齐")
+          PY
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
