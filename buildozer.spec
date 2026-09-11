@@ -13,7 +13,7 @@ source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,otf,json,md,txt
 # 打包内置课程需要的业务模块（core 目录）与界面（ui 目录）已随 source.dir 全部包含；
 # 下面显式排除开发/测试相关文件，减小 APK 体积。
 source.exclude_exts = spec,sh,yml,yaml
-source.exclude_dirs = tools,.github,__pycache__,.git,build,.buildozer,bin
+source.exclude_dirs = tools,.github,__pycache__,.git,build,.buildozer,bin,p4a-recipes
 
 version = 1.0.0
 
@@ -43,9 +43,9 @@ android.api = 34
 # 24 仍覆盖 99% 以上的在役设备。
 android.minapi = 24
 
-# 必须显式锁定 NDK：不锁时 buildozer 会拉最新的 r28c，其 clang 自 16 起把
-# “函数指针类型不兼容”由警告提升为默认错误，Kivy 的 C 扩展（如 cgl_gl）会编译失败。
-# r25b 使用 clang 14，处于该变更之前，是 p4a 生态中验证最充分的版本。
+# 显式锁定 NDK 版本：不锁时 buildozer 会下载较新的 r28c，新 clang 对旧代码更严格
+# （如把更多告警升级为错误）。r25b 是 p4a 生态中验证最充分、踩坑最少的版本，
+# 实测可与下面 android.api=34 正常配合编译。
 android.ndk = 25b
 
 # 默认只编 arm64-v8a（覆盖 2016 年后的绝大多数手机，构建快一倍）。
@@ -57,6 +57,10 @@ android.accept_sdk_license = True
 
 # 软键盘：不强制弹出，由用户点击输入框唤起（避免遮挡打字板）
 android.soft_input_mode = resize
+
+# 用本地 recipe 覆盖官方 python3 recipe，禁用 Android 不提供的 grp 函数
+# （详见 p4a-recipes/python3/__init__.py 中的说明）。这是构建必需项，勿删。
+p4a.local_recipes = p4a-recipes
 
 # 图标与启动图（可自行放入 assets/ 后取消注释）
 # icon.filename = assets/icon.png
