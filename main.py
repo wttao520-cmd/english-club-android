@@ -125,13 +125,27 @@ class EnglishClubApp(App):
     def build(self):
         self.title = "句子俱乐部"
         base = self.user_data_dir if self._is_android() else None
-        setup_font(base)
+        font_path = setup_font(base)
         from ui.theme import FONT_NAME
         self.font_name = FONT_NAME
 
         self.ctx = AppContext(base)
         db.init_db()
         seed()
+
+        self.root_widget = RootWidget(self)
+        self.sm = self.root_widget.sm
+        self.refresh_all()
+        self.goto("practice")
+
+        # 启动信息写日志，便于排查安卓端问题
+        try:
+            from kivy.logger import Logger
+            Logger.info("ClubApp: font=%s base=%s screens=%s"
+                        % (font_path, base, self.sm.screen_names))
+        except Exception:
+            pass
+        return self.root_widget
 
         self.root_widget = RootWidget(self)
         self.sm = self.root_widget.sm
@@ -209,7 +223,13 @@ class EnglishClubApp(App):
 
 
 def main():
-    if "--tablet" not in sys.argv:
+    # 窗口尺寸只在桌面预览时设置；Android 上 Window 由 bootstrap 创建，改尺寸无意义
+    try:
+        from kivy.utils import platform
+        is_android = platform == "android"
+    except Exception:
+        is_android = False
+    if not is_android and "--tablet" not in sys.argv:
         Window.size = (420, 880)
     EnglishClubApp().run()
 

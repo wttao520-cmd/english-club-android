@@ -68,18 +68,50 @@ def _first_existing(paths):
 
 
 def setup_font(app_dir=None):
-    """注册全局字体，返回是否找到中文字体。"""
-    candidates = list(_FONT_CANDIDATES)
-    if app_dir:
-        candidates = [os.path.join(app_dir, "fonts", "NotoSansSC-Subset.otf")] + candidates
-    path = _first_existing(candidates)
-    if not path:
-        return False
+    """注册全局字体。返回实际使用的字体路径（None 表示用了内置兜底）。
+
+    路径解析顺序：
+      1. 相对本文件的路径：ui/theme.py 往上两级即项目根 / APK 内的应用目录。
+         不能用 cwd 相对路径——Android 进程的 cwd 是 "/"，必然找不到。
+      2. kivy.resource_find：Kivy 的资源搜索机制，能定位 APK 内 assets。
+      3. Android 系统字体目录。
+      4. 兜底：把 FONT_NAME 注册为 Kivy 自带 Roboto——保证所有
+         font_name=FONT_NAME 的控件不会因字体缺失而崩溃（中文会显示方块，
+         但应用能启动；该情况只在以上全部落空时发生）。
+    """
+    candidates = []
     try:
-        LabelBase.register(FONT_NAME, fn_regular=path)
-        return True
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidates += [
+            os.path.join(root, "assets", "fonts", "NotoSansSC-Subset.otf"),
+            os.path.join(root, "assets", "fonts", "NotoSansSC-Regular.otf"),
+            os.path.join(root, "assets", "fonts", "NotoSansSC-Regular.ttf"),
+        ]
     except Exception:
-        return False
+        pass
+    try:
+        from kivy.resources import resource_find
+        found = resource_find("assets/fonts/NotoSansSC-Subset.otf")
+        if found:
+            candidates.append(found)
+    except Exception:
+        pass
+    if app_dir:
+        candidates.append(os.path.join(app_dir, "fonts", "NotoSansSC-Subset.otf"))
+    candidates += _FONT_CANDIDATES
+
+    path = _first_existing(candidates)
+    try:
+        if path:
+            LabelBase.register(FONT_NAME, fn_regular=path)
+            return path
+        # 全部落空：用 Kivy 自带 Roboto 兜底，绝不返回未注册状态
+        from kivy import kivy_data_dir
+        LabelBase.register(
+            FONT_NAME, fn_regular=os.path.join(kivy_data_dir, "fonts", "Roboto.ttf"))
+        return None
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------------ 控件
