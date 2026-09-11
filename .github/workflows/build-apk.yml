@@ -141,27 +141,28 @@ jobs:
           echo "===== bin/ 产物 ====="
           ls -la bin/
 
-          # Android 15+/16 的 16KB 页设备校验：每个 .so 的最大 PT_LOAD p_align
-          # 必须 >= 0x4000 (16KB)。用 Python 标准库直接解析 ELF，不依赖外部工具。
-          echo "===== 16KB page alignment check ====="
+          # Android 校验（双保险）：
+          # 1) 架构校验：所有 ELF .so 必须 AArch64 —— 防止 pip 交叉打包时混入
+          #    x86_64 wheel（如 chardet 7 的 mypyc 扩展，import 即 SIGILL 闪退）；
+          # 2) 16KB 页校验：PT_LOAD p_align >= 0x4000，防 Android 15+/16 16KB 页设备闪退。
+          # 检查范围：APK lib/ 目录 + libpybundle.so（p4a 的 tar 包）内部全部 .so。
+          echo "===== .so arch + 16KB alignment check ====="
           python3 - <<'PY'
-          import glob, struct, zipfile
+          import glob, io, struct, tarfile, zipfile
 
           apk = sorted(glob.glob("bin/*.apk"))[0]
           z = zipfile.ZipFile(apk)
-          sos = [n for n in z.namelist()
-                 if n.startswith("lib/") and n.endswith(".so")]
-          assert sos, "APK 中没有 .so"
 
-          bad = []
-          for name in sos:
-              d = z.read(name)
+          def elf_check(d, name):
               if d[:4] != b"\x7fELF":
-                  # p4a 把 Python 代码包打成 tar 并命名为 libpybundle.so 放入 lib/，
-                  # 运行时由 PythonUtil.unpackPyBundle 解包，不是 ELF、不参与 mmap，无需对齐
-                  print("SKIP", name, "(非 ELF: p4a python bundle tar)")
-                  continue
-              assert d[4] == 2, f"{name}: 非 64 位 ELF"
+                  print("SKIP", name, "(非 ELF)")
+                  return True
+              if d[4] != 2:
+                  print("FAIL", name, "非 64 位 ELF"); return False
+              machine = struct.unpack_from("<H", d, 0x12)[0]
+              if machine != 183:  # EM_AARCH64
+                  print("FAIL", name, "非 ARM64 (machine=%d)!" % machine)
+                  return False
               phoff = struct.unpack_from("<Q", d, 0x20)[0]
               phentsize = struct.unpack_from("<H", d, 0x36)[0]
               phnum = struct.unpack_from("<H", d, 0x38)[0]
@@ -169,17 +170,30 @@ jobs:
               for i in range(phnum):
                   off = phoff + i * phentsize
                   if struct.unpack_from("<I", d, off)[0] == 1:  # PT_LOAD
-                      align = struct.unpack_from("<Q", d, off + 0x30)[0]
-                      best = max(best, align)
+                      best = max(best, struct.unpack_from("<Q", d, off + 0x30)[0])
               ok = best >= 0x4000
               print(("OK  " if ok else "FAIL"), name, hex(best))
-              if not ok:
-                  bad.append(name)
+              return ok
+
+          bad = total = 0
+          for n in z.namelist():
+              if n.startswith("lib/") and n.endswith(".so"):
+                  total += 1
+                  if not elf_check(z.read(n), n):
+                      bad += 1
+              elif n.endswith("libpybundle.so"):
+                  tf = tarfile.open(fileobj=io.BytesIO(z.read(n)))
+                  for m in tf.getmembers():
+                      if m.name.endswith(".so"):
+                          total += 1
+                          if not elf_check(tf.extractfile(m).read(),
+                                           "pybundle:" + m.name):
+                              bad += 1
 
           if bad:
               raise SystemExit(
-                  f"{len(bad)} 个 .so 不是 16KB 对齐，Android 15+/16 设备会闪退！")
-          print(f"全部 {len(sos)} 个 .so 满足 16KB 对齐")
+                  f"{bad} 个 .so 校验失败（CPU 架构错误或未 16KB 对齐）！")
+          print(f"全部 {total} 个 .so 校验通过（ARM64 + 16KB 对齐）")
           PY
 
       - name: Upload APK

@@ -26,7 +26,10 @@ version = 1.0.0
 #      函数指针签名是 const GLchar**，与 SDL2 头文件的 const GLchar* const*
 #      不兼容，NDK r28c 的 clang 18 把「函数指针类型不兼容」默认升级为错误；
 #      2.3.1 已改为精确匹配签名。
-requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,requests
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,requests,chardet==4.0.0
+# chardet 必须锁 4.0.0（纯 Python）：requests 会 import chardet，而 PyPI 没有
+# Android 平台的 chardet 7.x wheel，pip 会错装 x86_64 Linux 版（内含 mypyc C 扩展），
+# arm64 设备上 import 即 SIGILL 闪退（chardet 5.0+ 才引入 mypyc 编译）。
 
 # 屏幕方向：跟随系统重力感应四向自由旋转（手机竖屏、平板横屏都适配）
 # 合法值仅：landscape / portrait / landscape-reverse / portrait-reverse / all
