@@ -27,26 +27,29 @@ from pythonforandroid.recipes.python3 import Python3Recipe
 
 class Python3RecipeGrpFix(Python3Recipe):
     configure_args = Python3Recipe.configure_args + [
-        # ---- 头文件级禁用（决定整个模块是否编译）----
-        # grp.h：bionic 只有 getgrgid/getgrnam，无组遍历。禁用后 grp 模块不编译。
-        'ac_cv_header_grp_h=no',
-        # pwd.h：同族预防。pwdmodule.c 的 getpwall 与 grpmodule.c 同构，
-        # 若不整块禁用，下一轮大概率在 pwdmodule.c 报 setpwent/getpwent 错误。
-        'ac_cv_header_pwd_h=no',
-        # ---- 函数级禁用（posixmodule.c 的 os.initgroups / os.setgroups）----
-        # configure 用「链接检测」判定这些函数存在（现代 NDK 统一 sysroot 的
-        # libc.so 里有符号），但 minapi=24 时头文件声明被 #if __ANDROID_API__
-        # 屏蔽 → HAVE_* 被误判定义 → 编译期 implicit declaration 报错。
-        # ac_cv_*=no 让 configure 跳过检测直接判无，相关代码被 #ifdef 跳过。
-        'ac_cv_func_initgroups=no',
-        'ac_cv_func_setgroups=no',
+        # 只禁用 bionic 真正缺失的函数，不禁头文件。
+        #
+        # 关键教训：之前禁了 grp.h / pwd.h（ac_cv_header_*=no），结果
+        # getgrouplist 这类「Android 上真实存在」的函数因为声明所在头文件
+        # 被禁而在 posixmodule.c 中变成 implicit declaration——头文件一禁，
+        # 里面所有函数的声明都不可见，而 configure 的链接检测仍会找到符号、
+        # 误判 HAVE_GETGROUPLIST 存在。因此：
+        #   - 头文件保持启用（声明可见）
+        #   - 只禁用 configure 会误判的缺失函数（链接检测被统一 sysroot 骗过）
+        #
+        # grp 遍历族：bionic 无实现，grpmodule.c 用 #ifdef 引用，禁用后跳过
         'ac_cv_func_setgrent=no',
         'ac_cv_func_getgrent=no',
         'ac_cv_func_endgrent=no',
+        # posix 组操作族：bionic 无实现（或 API>=26 才有声明），禁用后 os 模块
+        # 不再提供 initgroups/setgroups（本应用不需要）
+        'ac_cv_func_initgroups=no',
+        'ac_cv_func_setgroups=no',
+        # pwd 遍历族：与 grp 同构，预防 pwdmodule.c 报同类错误
         'ac_cv_func_setpwent=no',
         'ac_cv_func_getpwent=no',
         'ac_cv_func_endpwent=no',
-        # 同族预防：bionic 无此实现（登录名查询），本应用不需要
+        # 登录名查询：bionic 无实现，本应用不需要
         'ac_cv_func_getlogin=no',
         'ac_cv_func_getlogin_r=no',
     ]
