@@ -22,7 +22,10 @@ version = 1.0.0
 #   1) 不锁会拉到最新的 Python 3.14，其 Python/remote_debugging.c 用了 preadv/pwritev，
 #      在 minapi<24 时头文件里未声明，编译直接失败（p4a 自带的 3.14 补丁没覆盖这里）；
 #   2) Kivy 2.3.0 官方只支持到 Python 3.12，用 3.14 大概率在编译 Kivy 时因 C-API 变更再崩。
-requirements = python3==3.11.9,kivy==2.3.0,requests
+#   3) hostpython3 是交叉编译用的宿主机 Python，p4a 强制要求它与 python3 同版本，
+#      否则报 "python3 should have same version as hostpython3, 3.11.9 != 3.14.2"。
+#      故两者必须同时、且同版本锁定。
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0,requests
 
 # 屏幕方向：跟随系统重力感应四向自由旋转（手机竖屏、平板横屏都适配）
 # 合法值仅：landscape / portrait / landscape-reverse / portrait-reverse / all

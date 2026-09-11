@@ -84,12 +84,17 @@ jobs:
           # minapi<24 时 Android 头文件不声明 preadv/pwritev，编译 Python 必失败
           minapi = int(c.get("app", "android.minapi", fallback="23"))
           assert minapi >= 24, f"android.minapi={minapi}，必须 >= 24"
-          # 不锁定版本会拉到 Python 3.14，与 Kivy 2.3.0 不兼容
+          # 不锁定版本会拉到 Python 3.14，与 Kivy 2.3.0 不兼容；
+          # 且 hostpython3 必须与 python3 同版本，否则 p4a 直接报错退出
           reqs = c.get("app", "requirements", fallback="")
           assert "python3==" in reqs, "requirements 必须锁定 python3 版本"
+          assert "hostpython3==" in reqs, "requirements 必须锁定 hostpython3 版本"
+          pv = re.search(r"\bpython3==([\d.]+)", reqs).group(1)
+          hv = re.search(r"\bhostpython3==([\d.]+)", reqs).group(1)
+          assert pv == hv, f"python3({pv}) 与 hostpython3({hv}) 版本必须一致"
           print("spec 校验通过")
           print("  orientation =", orients, "| minapi =", minapi)
-          print("  requirements =", reqs)
+          print("  python3 =", pv, "| hostpython3 =", hv)
           PY
 
       - name: Build debug APK
