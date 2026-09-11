@@ -339,7 +339,14 @@ class PracticeScreen(Screen):
         self._render()
         self._speak()
         if self.ctx.config.get("auto_next", True):
-            Clock.schedule_once(lambda dt: self._auto_next(), 1.1)
+            self._auto_event = Clock.schedule_once(lambda dt: self._auto_next(), 1.1)
+
+    def _cancel_auto_next(self):
+        """取消已排定的自动前进（用户手动点了「下一句」时立即走）。"""
+        ev = getattr(self, "_auto_event", None)
+        if ev is not None:
+            ev.cancel()
+            self._auto_event = None
 
     def _auto_next(self):
         if self.session and self.session.state and self.session.state.finished:
@@ -348,6 +355,8 @@ class PracticeScreen(Screen):
     def _manual_next(self, *a):
         st = self.session.state if self.session else None
         if st is not None and st.finished:
+            # 句子已完成：立即进下一句，取消 1.1 秒自动等待
+            self._cancel_auto_next()
             self._next_sentence()
         elif self.session is not None and st is not None:
             # 给出可见反馈，避免“点了没反应”的困惑
@@ -375,6 +384,9 @@ class PracticeScreen(Screen):
             st.skipped = True   # 结算时 rating=Again、score=0（见 engine.py）
             st.finished_at = time.time()
             self._on_sentence_done()
+            # 跳过意图明确：立即进下一句，不等自动计时
+            self._cancel_auto_next()
+            self._next_sentence()
 
     def _speak(self, *a):
         if not self.ctx.config.get("tts_enabled", True):
