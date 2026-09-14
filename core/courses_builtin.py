@@ -243,11 +243,17 @@ COURSES = [
 def seed():
     """把内置课程写入数据库（已存在则跳过）。"""
     from . import phonics_data
+    from .vocab_primary import VOCAB_COURSES
 
     conn = db.connect()
     exist = {r["builtin_key"] for r in conn.execute("SELECT builtin_key FROM courses").fetchall()}
     conn.close()
     for c in COURSES:
+        if c["key"] in exist:
+            continue
+        cid = db.add_course(c["title"], c["desc"], c["level"], "builtin", c["key"])
+        db.add_sentences(cid, c["items"])
+    for c in VOCAB_COURSES:
         if c["key"] in exist:
             continue
         cid = db.add_course(c["title"], c["desc"], c["level"], "builtin", c["key"])
