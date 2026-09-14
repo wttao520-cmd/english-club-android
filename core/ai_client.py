@@ -33,13 +33,13 @@ class AIClient(object):
 
     def chat(self, system, user, temperature=0.3, use_cache=True):
         """调用一次对话，返回字符串结果。"""
-        key = "chat:" + _md5((system or "") + "||" + (user or "") + "||" +
-                             str(self.config.get("ai_model")))
-        if use_cache:
-            cached = db.cache_get(key)
-            if cached is not None:
-                return cached
+        return self.chat_messages(
+            [{"role": "system", "content": system or ""},
+             {"role": "user", "content": user or ""}],
+            temperature, use_cache)
 
+    def chat_messages(self, messages, temperature=0.3, use_cache=False):
+        """多轮对话：messages 为 [{"role": ..., "content": ...}, ...]。"""
         if not self.config.get("ai_api_key"):
             raise AIError("尚未配置 AI API Key，请在「设置」中填写。")
 
@@ -50,10 +50,7 @@ class AIClient(object):
 
         payload = {
             "model": self.config.get("ai_model") or "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
             "temperature": temperature,
             "stream": False,
         }
@@ -75,10 +72,7 @@ class AIClient(object):
         except Exception:
             raise AIError("解析 AI 返回结果失败：%s" % resp.text[:300])
 
-        content = (content or "").strip()
-        if use_cache:
-            db.cache_put(key, content)
-        return content
+        return (content or "").strip()
 
     # ------------------------------------------------------------ 具体能力
     def translate(self, text):

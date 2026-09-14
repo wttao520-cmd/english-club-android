@@ -22,15 +22,33 @@ from core import db
 from core.engine import RATING_LABEL, Session
 from core.srs import rating_to_quality, schedule
 from core.worker import run_async
-from .theme import (ACCENT, BLUE, CARD, FONT_NAME, GREEN, MUTED, RED, TEXT,
-                    YELLOW, AppLabel, AppSpinner, AppSpinnerOption, AppTextInput,
-                    PrimaryButton, TitleLabel, rgba)
-from .widgets import ComboBadge, TypingBoard
+from .theme import (ACCENT, BLUE, CARD, FONT_NAME, GREEN, IPA_FONT_NAME,
+                    MUTED, PANEL2, RED, TEXT, YELLOW, AppLabel, AppSpinner,
+                    AppSpinnerOption, AppTextInput, PrimaryButton, TitleLabel,
+                    rgba)
+from .widgets import ComboBadge, PickerPopup, TypingBoard
+from .pet_screen import PetEntry
 
 MODES = [("句子模式", "sentence"), ("单词模式", "word"),
          ("默写模式", "dictation"), ("拼读模式（听音拼写）", "phonics")]
 
 RATING_COLOR = {5: GREEN, 4: ACCENT, 3: YELLOW, 0: RED}
+
+LESSON_SIZE = 10
+
+
+def lesson_count(n_items):
+    """课程共有多少关。"""
+    return max(1, -(-n_items // LESSON_SIZE))
+
+
+def stars_for(accuracy, rating_avg):
+    """按准确率与平均评分给 1~3 星。"""
+    if accuracy >= 90 and rating_avg >= 4.5:
+        return 3
+    if accuracy >= 70:
+        return 2
+    return 1
 
 
 class AIPanel(Popup):
@@ -100,25 +118,36 @@ class PracticeScreen(Screen):
     def _build(self):
         root = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
 
-        # 顶部：课程 / 模式 / 分数 / 时间 / 连击
-        top = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-        self.course_spin = AppSpinner(text="选择课程", size_hint_x=0.46)
-        self.course_spin.bind(text=self._on_course_picked)
-        self.mode_spin = AppSpinner(
-            text=dict((v, k) for k, v in MODES).get(
-                self.ctx.config.get("mode", "sentence"), "句子模式"),
-            values=[m[0] for m in MODES], size_hint_x=0.34)
-        self.mode_spin.bind(text=self._on_mode_picked)
-        self.score_lbl = AppLabel(text="0", size_hint_x=None, width=dp(56),
-                                  font_size=sp(18), bold=True, color=rgba(GREEN),
-                                  halign="right")
-        self.time_lbl = AppLabel(text="00:00", size_hint_x=None, width=dp(56),
-                                 font_size=sp(13), color=rgba(MUTED), halign="right")
-        top.add_widget(self.course_spin)
-        top.add_widget(self.mode_spin)
-        top.add_widget(self.score_lbl)
-        top.add_widget(self.time_lbl)
+        # 第一行：宠物+积分入口 | 课程选择 | 模式选择（全弹窗化，竖屏不截断）
+        top = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+        self.pet_entry = PetEntry()
+        top.add_widget(self.pet_entry)
+        self.course_btn = PrimaryButton(
+            text="选择课程", size_hint_x=1, font_size=sp(13), bg=rgba(PANEL2))
+        self.course_btn.bind(on_release=lambda b: self._pick_course())
+        top.add_widget(self.course_btn)
+        self.mode_btn = PrimaryButton(
+            text=self._mode_name(self.ctx.config.get("mode", "sentence")),
+            size_hint_x=None, width=dp(96), font_size=sp(12), bg=rgba(ACCENT))
+        self.mode_btn.bind(on_release=lambda b: self._pick_mode())
+        top.add_widget(self.mode_btn)
         root.add_widget(top)
+
+        # 第二行：关卡标签 | 得分 | 用时
+        row2 = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
+        self.lesson_lbl = AppLabel(text="", font_size=sp(12), color=rgba(YELLOW),
+                                   halign="left")
+        self.score_lbl = AppLabel(text="0 分", font_size=sp(14), bold=True,
+                                  color=rgba(GREEN), size_hint_x=None,
+                                  width=dp(70), halign="right")
+        self.time_lbl = AppLabel(text="00:00", font_size=sp(13),
+                                 color=rgba(MUTED), size_hint_x=None,
+                                 width=dp(54), halign="right")
+        row2.add_widget(self.lesson_lbl)
+        row2.add_widget(Widget())
+        row2.add_widget(self.score_lbl)
+        row2.add_widget(self.time_lbl)
+        root.add_widget(row2)
 
         combo_row = BoxLayout(size_hint_y=None, height=dp(64))
         combo_row.add_widget(Widget())
@@ -131,6 +160,13 @@ class PracticeScreen(Screen):
                                bold=True, halign="center", size_hint_y=None,
                                height=dp(56), color=rgba(TEXT))
         root.add_widget(self.zh_lbl)
+
+        # 音标行（词汇课程显示，IPAFont 专用字体）
+        self.ipa_lbl = Label(text="", font_name=IPA_FONT_NAME,
+                             font_size=sp(18), color=rgba(ACCENT),
+                             size_hint_y=None, height=dp(0), halign="center",
+                             valign="middle")
+        root.add_widget(self.ipa_lbl)
 
         self.note_lbl = AppLabel(text="", font_size=sp(12), color=rgba(MUTED),
                                  halign="center", size_hint_y=None, height=dp(20))
@@ -186,33 +222,79 @@ class PracticeScreen(Screen):
     def refresh_courses(self):
         courses = db.list_courses()
         self.course_ids = [c["id"] for c in courses]
-        self.course_spin.values = [c["title"] for c in courses]
-        if courses and self.course_spin.text not in self.course_spin.values:
-            self.course_spin.text = courses[0]["title"]
+        self.courses = [dict(c) for c in courses]
+        if not getattr(self, "_current_title", None) and courses:
+            self._current_title = courses[0]["title"]
+        self.course_btn.text = self._current_title or "选择课程"
+        self.pet_entry.refresh()
+
+    def _mode_name(self, mode):
+        return dict((v, k) for k, v in MODES).get(mode, "句子模式")
 
     def _current_cid(self):
-        i = (self.course_spin.values.index(self.course_spin.text)
-             if self.course_spin.text in self.course_spin.values else -1)
-        return self.course_ids[i] if 0 <= i < len(self.course_ids) else None
+        title = getattr(self, "_current_title", None)
+        for c in getattr(self, "courses", []):
+            if c["title"] == title:
+                return c["id"]
+        return self.course_ids[0] if self.course_ids else None
 
-    def _on_course_picked(self, spinner, text):
+    def _pick_course(self):
+        titles = [c["title"] for c in getattr(self, "courses", [])]
+        if not titles:
+            return
+        PickerPopup("选择课程", titles, self._course_chosen,
+                    current=getattr(self, "_current_title", None)).open()
+
+    def _course_chosen(self, title):
+        self._current_title = title
+        self.course_btn.text = title
+        self.lesson_lbl.text = ""
+        self._on_course_picked()
+
+    def _pick_mode(self):
+        names = [m[0] for m in MODES]
+        PickerPopup("练习模式", names, self._mode_chosen,
+                    current=self._mode_name(self._mode)).open()
+
+    def _mode_chosen(self, name):
+        mode = dict(MODES).get(name, "sentence")
+        self.ctx.config.set("mode", mode)
+        self.mode = mode
+        self.mode_btn.text = name
+        if self.session and self.session.state:
+            self._render()
+
+    def _on_course_picked(self, *a):
         cid = self._current_cid()
         if cid is None:
             return
-        app = App.get_running_app()
+        course = db.get_course(cid)
+        key = course["builtin_key"] if course else ""
         n = int(self.ctx.config.get("lesson_size", 10)) or 10
         rows = db.due_course_cards(cid, n)
         if not rows:
             rows = db.list_sentences(cid)[:n]
-        course = db.get_course(cid)
-        self.start([dict(r) for r in rows], course["title"] if course else "练习")
+        self.lesson_ctx = None
+        mode = "word" if key.startswith("vocab_") else None
+        self.start([dict(r) for r in rows],
+                   course["title"] if course else "练习", mode)
 
-    def _on_mode_picked(self, spinner, text):
-        mode = dict(MODES).get(text, "sentence")
-        self.ctx.config.set("mode", mode)
-        self.mode = mode
-        if self.session and self.session.state:
-            self._render()
+    def start_lesson(self, course_id, lesson_idx):
+        """闯关模式：练习课程的一个固定关卡。"""
+        course = db.get_course(course_id)
+        rows = db.sentences_range(course_id,
+                                  lesson_idx * LESSON_SIZE,
+                                  lesson_idx * LESSON_SIZE + LESSON_SIZE - 1)
+        if not rows:
+            return
+        mode = None
+        key = course["builtin_key"] if course else ""
+        if key.startswith("vocab_"):
+            mode = "word"
+        total_lessons = lesson_count(db.count_sentences(course_id))
+        self.lesson_ctx = (course_id, lesson_idx, total_lessons)
+        self.start([dict(r) for r in rows],
+                   course["title"] if course else "练习", mode)
 
     # ------------------------------------------------------------ 会话
     @property
@@ -229,10 +311,15 @@ class PracticeScreen(Screen):
             return
         if mode:
             self._mode = mode
-            name = dict((v, k) for k, v in MODES).get(mode, "句子模式")
-            self.mode_spin.text = name
+            self.mode_btn.text = self._mode_name(mode)
+        lctx = getattr(self, "lesson_ctx", None)
+        if lctx:
+            self.lesson_lbl.text = "第 %d / %d 关" % (lctx[1] + 1, lctx[2])
+        else:
+            self.lesson_lbl.text = "自由练习"
         self._switching = True   # 清空输入框期间屏蔽 _on_text
         self.session = Session(list(sentences), title)
+        self.session.earned = 0
         self.input.text = ""
         self._switching = False
         self._next_sentence()
@@ -272,6 +359,14 @@ class PracticeScreen(Screen):
             return
         self.zh_lbl.text = cur["zh"] or "（暂无译文，可让 AI 翻译）"
         note = cur["note"] if "note" in cur.keys() else ""
+        # 音标行：note 以「音标：/…/」开头时提取显示（IPAFont）
+        ipa_text = ""
+        if note.startswith("音标："):
+            nl = note.find("\n")
+            ipa_text = note[3:nl if nl > 0 else None].strip()
+            note = note[nl + 1:] if nl > 0 else ""
+        self.ipa_lbl.text = ipa_text
+        self.ipa_lbl.height = dp(26) if ipa_text else dp(0)
         if self._mode == "phonics" and note.count("｜") == 2:
             note = "%s｜%s" % (note.split("｜")[1], note.split("｜")[2])
         self.note_lbl.text = note or ""
@@ -332,10 +427,19 @@ class PracticeScreen(Screen):
         if res["rating"] == 0:
             self.session.sentences.append(dict(self.session.current))
 
+        # ---- 积分：完成即得，Perfect 与连击有加成 ----
+        gain = 2 + (3 if res["rating"] == 5 else 0) \
+            + min(5, res["combo_max"] // 5)
+        new_total = db.add_points(gain)
+        self.pet_entry.refresh()
+        self.session.earned = getattr(self.session, "earned", 0) + gain
+
         color = RATING_COLOR.get(res["rating"], TEXT)
-        self.rating_lbl.text = ("[color=%s]%s[/color]  [color=%s]%.0f WPM · 准确率 %.0f%%[/color]"
-                                % (color, RATING_LABEL[res["rating"]], MUTED,
-                                   res["wpm"], res["accuracy"]))
+        self.rating_lbl.text = (
+            "[color=%s]%s[/color]  [color=%s]%.0f WPM · 准确率 %.0f%%[/color]"
+            "  [color=%s]+%d 分[/color]"
+            % (color, RATING_LABEL[res["rating"]], MUTED,
+               res["wpm"], res["accuracy"], YELLOW, gain))
         self._render()
         self._speak()
         if self.ctx.config.get("auto_next", True):
@@ -398,13 +502,44 @@ class PracticeScreen(Screen):
         summary = self.session.summary()
         self.board.set_state("", "", 0)
         self.zh_lbl.text = "本关完成！"
+        self.ipa_lbl.text = ""
+        self.ipa_lbl.height = dp(0)
         self.progress.value = 100
+
+        # ---- 关卡结算：算星、落库、首次通关奖励 ----
+        stars = stars_for(summary["accuracy"],
+                          summary["score"] / max(1, summary["sentences"] * 100))
+        summary["stars"] = stars
+        summary["points"] = getattr(self.session, "earned", 0)
+        lctx = getattr(self, "lesson_ctx", None)
+        summary["lesson"] = lctx
+        if lctx:
+            course_id, idx, total_lessons = lctx
+            first = db.lesson_stars(course_id).get(idx, 0) == 0
+            db.lesson_save_star(course_id, idx, stars, summary["score"])
+            bonus = 20 if first else 5
+            db.add_points(bonus)
+            summary["points"] += bonus
+            self.lesson_lbl.text = "第 %d / %d 关 · %s" % (
+                idx + 1, total_lessons, "★" * stars)
+        else:
+            db.add_points(5)  # 自由练习整场奖励
+            summary["points"] += 5
+        self.pet_entry.refresh()
+
         App.get_running_app().refresh_all()
         self._show_summary(summary)
 
     def _show_summary(self, s):
         box = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         box.add_widget(TitleLabel(text="关卡完成！"))
+        if s.get("lesson"):
+            cid, idx, total = s["lesson"]
+            box.add_widget(AppLabel(
+                text="第 %d / %d 关 · [color=%s]%s[/color]" % (
+                    idx + 1, total, YELLOW, "*" * s["stars"]),
+                font_size=sp(15), size_hint_y=None, height=dp(28),
+                halign="center"))
         for name, val, color in [("得分", str(s["score"]), GREEN),
                                  ("准确率", "%.1f%%" % s["accuracy"], ACCENT),
                                  ("速度", "%.0f WPM" % s["wpm"], TEXT),
@@ -412,6 +547,9 @@ class PracticeScreen(Screen):
                                  ("Perfect", "%d / %d" % (s["perfect"], s["sentences"]), GREEN)]:
             box.add_widget(AppLabel(text="[color=%s]%s[/color]：%s" % (color, name, val),
                                     font_size=sp(16), size_hint_y=None, height=dp(28)))
+        box.add_widget(AppLabel(
+            text="[color=%s]获得 %d 积分 · 去喂宠物吧！[/color]" % (YELLOW, s["points"]),
+            font_size=sp(15), size_hint_y=None, height=dp(30), halign="center"))
         box.add_widget(AppLabel(text="用时 %.1f 分钟 · %s" % (s["elapsed"] / 60.0, s["title"]),
                                 font_size=sp(12), color=rgba(MUTED),
                                 size_hint_y=None, height=dp(24)))
@@ -422,11 +560,11 @@ class PracticeScreen(Screen):
         bar.add_widget(back)
         box.add_widget(bar)
 
-        popup = Popup(title="", content=box, size_hint=(0.9, 0.7),
+        popup = Popup(title="", content=box, size_hint=(0.9, 0.75),
                       background="", background_color=rgba(CARD),
                       separator_height=0)
         again.bind(on_release=lambda b: (popup.dismiss(),
-                                         self._on_course_picked(None, self.course_spin.text)))
+                                         self._on_course_picked()))
         back.bind(on_release=popup.dismiss)
         popup.open()
 

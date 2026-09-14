@@ -22,11 +22,11 @@ from .widgets import BarChart, StatCard
 RATING_TEXT = {5: "Perfect", 4: "Great", 3: "Good", 0: "Again"}
 
 
-def _row_card(rows, on_open=None, open_text="开始练习"):
-    """一行课程卡片。"""
+def _row_card(rows, on_open=None, open_text="开始闯关"):
+    """一行课程卡片（点击进入关卡选择）。"""
     box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(4),
                     size_hint_y=None, height=dp(74))
-    from kivy.graphics import Color, RoundedRectangle
+    from kivy.graphics import Color, Rectangle, RoundedRectangle
     with box.canvas.before:
         Color(*rgba(CARD))
         box._rect = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
@@ -39,7 +39,7 @@ def _row_card(rows, on_open=None, open_text="开始练习"):
                             size_hint_x=None, width=dp(60), halign="right"))
     box.add_widget(top)
     bottom = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
-    bottom.add_widget(AppLabel(text="共 %s 句 · 待复习 %s" % (rows[2], rows[3]),
+    bottom.add_widget(AppLabel(text="%s 关 · 待复习 %s" % (rows[2], rows[3]),
                                font_size=sp(12), color=rgba(MUTED), halign="left"))
     if on_open:
         b = PrimaryButton(text=open_text, size_hint_x=None, width=dp(92),
@@ -47,7 +47,97 @@ def _row_card(rows, on_open=None, open_text="开始练习"):
         b.bind(on_release=lambda x: on_open())
         bottom.add_widget(b)
     box.add_widget(bottom)
+
+    # 左侧彩色条（子 widget，层级在卡片之上）
+    bar = Widget(size_hint=(None, None))
+    with bar.canvas:
+        Color(*rgba(ACCENT, 0.9))
+        bar._r = Rectangle(pos=(box.x + dp(2), box.y + dp(2)),
+                           size=(dp(3), box.height - dp(4)))
+    box.bind(pos=lambda o, v: setattr(bar._r, "pos",
+                                      (v[0] + dp(2), v[1] + dp(2))),
+             size=lambda o, v: setattr(bar._r, "size",
+                                       (dp(3), v[1] - dp(4))))
+    box.add_widget(bar)
     return box
+
+
+class LessonPopup(Popup):
+    """课程的关卡选择：圆点按钮 + 星级 + 逐关解锁（多邻国式）。"""
+
+    def __init__(self, course, app, **kw):
+        Popup.__init__(self, title="", separator_height=0, **kw)
+        self.size_hint = (0.9, 0.85)
+        self.background = ""
+        self.background_color = rgba("#141922")
+        self.course = course
+        self.app = app
+
+        n_items = db.count_sentences(course["id"])
+        n_lessons = max(1, -(-n_items // 10))
+        stars = db.lesson_stars(course["id"])
+
+        root = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
+        head = BoxLayout(size_hint_y=None, height=dp(36))
+        head.add_widget(AppLabel(text="[b]%s[/b]" % course["title"],
+                                 font_size=sp(17), halign="left"))
+        close = PrimaryButton(text="关闭", size_hint_x=None, width=dp(76),
+                              font_size=sp(13), bg=rgba(CARD))
+        close.bind(on_release=lambda x: self.dismiss())
+        head.add_widget(close)
+        root.add_widget(head)
+        total_stars = sum(stars.values())
+        root.add_widget(AppLabel(
+            text="共 %d 关 · 已获得 [color=%s]★%d[/color] · 通过上一关解锁下一关"
+                 % (n_lessons, YELLOW, total_stars),
+            font_size=sp(12), color=rgba(MUTED), size_hint_y=None,
+            height=dp(20), halign="left"))
+
+        sv = ScrollView()
+        grid = GridLayout(cols=3, spacing=dp(12), size_hint_y=None,
+                          padding=dp(6))
+        grid.bind(minimum_height=grid.setter("height"))
+        unlocked_next = True
+        for i in range(n_lessons):
+            got = stars.get(i, 0)
+            is_open = unlocked_next
+            if got > 0:
+                unlocked_next = True
+            elif is_open and got == 0 and i > 0 and stars.get(i - 1, 0) == 0:
+                is_open = False
+            if got == 0 and i > 0 and stars.get(i - 1, 0) == 0:
+                is_open = False
+
+            cell = BoxLayout(orientation="vertical", spacing=dp(2),
+                             size_hint_y=None, height=dp(96))
+            label = AppLabel(
+                text=("[color=%s]%s[/color]" % (YELLOW, "*" * got)
+                      if got else ("[color=%s]?[/color]" % MUTED
+                                   if not is_open else
+                                   "[color=%s]第 %d 关[/color]" % (TEXT, i + 1))),
+                font_size=sp(12), size_hint_y=None, height=dp(18),
+                halign="center")
+            if got == 0 and is_open:
+                label.text = "[color=%s]第 %d 关[/color]" % (TEXT, i + 1)
+            btn = PrimaryButton(
+                text=("★%d" % got) if got else ("锁" if not is_open
+                                                else str(i + 1)),
+                font_size=sp(20),
+                bg=rgba(GREEN if got == 3 else BLUE if is_open else "#20262f"),
+                size_hint_y=None, height=dp(64))
+            btn.disabled = not is_open
+            if is_open:
+                btn.bind(on_release=lambda x, idx=i: self._go(idx))
+            cell.add_widget(btn)
+            cell.add_widget(label)
+            grid.add_widget(cell)
+        sv.add_widget(grid)
+        root.add_widget(sv)
+        self.content = root
+
+    def _go(self, idx):
+        self.dismiss()
+        self.app.start_lesson(self.course["id"], idx)
 
 
 class CoursesScreen(Screen):
@@ -71,18 +161,19 @@ class CoursesScreen(Screen):
 
     def refresh(self):
         self.grid.clear_widgets()
+        app = App.get_running_app()
         for c in db.list_courses():
             n = db.count_sentences(c["id"])
             due = db.due_count(c["id"])
             card = _row_card([c["title"], c["level"], n, due],
-                             on_open=lambda cid=c["id"]: self._open(cid))
-            card.bind(on_touch_down=lambda w, t, cid=c["id"]:
-                      self._open(cid) if w.collide_point(*t.pos) and t.is_double_tap
+                             on_open=lambda cc=dict(c): self._open(cc))
+            card.bind(on_touch_down=lambda w, t, cc=dict(c):
+                      self._open(cc) if w.collide_point(*t.pos) and t.is_double_tap
                       else None)
             self.grid.add_widget(card)
 
-    def _open(self, cid):
-        App.get_running_app().start_course(cid)
+    def _open(self, course):
+        LessonPopup(course, App.get_running_app()).open()
 
 
 class ReviewScreen(Screen):

@@ -2,14 +2,19 @@
 """自绘控件：打字板、连击徽章、统计卡片、柱状图。"""
 
 from kivy.core.text import Label as CoreLabel
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle, Triangle
 from kivy.metrics import dp, sp
 from kivy.properties import (BooleanProperty, ListProperty, NumericProperty,
                              ObjectProperty, StringProperty)
+from kivy.uix.popup import Popup
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
 
-from .theme import (ACCENT, BLUE, BORDER, CHUNK_COLORS, FONT_NAME, GREEN,
-                    MUTED, RED, TEXT, YELLOW, rgba)
+from .theme import (ACCENT, BLUE, BORDER, CARD, CHUNK_COLORS, FONT_NAME, GREEN,
+                    MUTED, PANEL2, RED, TEXT, YELLOW, AppLabel, PrimaryButton,
+                    rgba)
 
 _TEX_CACHE = {}
 
@@ -340,3 +345,179 @@ class StatCard(Widget):
             if v:
                 Rectangle(texture=v, pos=(self.x + dp(14), self.y + dp(14)), size=v.size)
             Color(*rgba(BORDER))
+
+
+# ==================================================================
+# 宠物：纯 canvas 绘制的几何小宠物（无外部素材，APK 零体积成本）
+# ==================================================================
+class PetWidget(Widget):
+    """根据 species 与进化阶段画一只小宠物。
+
+    stage: 0 幼年（小圆脸）/ 1 成长（加身体+肚皮）/ 2 完全体（加皇冠）
+    """
+
+    species = StringProperty("cat")
+    stage = NumericProperty(0)
+    happy = BooleanProperty(False)
+
+    _SKETCH = {
+        "cat": "ears_point", "bunny": "ears_long", "duck": "beak",
+        "panda": "ears_round", "fox": "ears_big", "unicorn": "horn",
+    }
+
+    def __init__(self, **kw):
+        Widget.__init__(self, **kw)
+        self.bind(species=self.redraw, stage=self.redraw, pos=self.redraw,
+                  size=self.redraw, happy=self.redraw)
+
+    def redraw(self, *a):
+        from core.pet import colors
+        self.canvas.clear()
+        body, shade = colors(self.species)
+        ear = self._SKETCH.get(self.species, "ears_point")
+        s = max(dp(10), min(self.width, self.height))
+        cx, cy = self.center_x, self.center_y
+        r = s * (0.20 if self.stage == 0 else 0.22)
+        head_y = cy + s * (0.20 if self.stage else 0.08)
+        eye_dx, eye_dy = r * 0.42, r * 0.10
+        er = max(dp(1.2), r * 0.10)
+
+        with self.canvas:
+            # ---- 身体（成长期起）----
+            if self.stage >= 1:
+                bw, bh = r * 1.5, r * 1.25
+                by = cy - s * 0.30
+                Color(*rgba(shade))
+                Ellipse(pos=(cx - bw / 2 - dp(1.5), by - dp(1.5)),
+                        size=(bw + dp(3), bh + dp(3)))
+                Color(*rgba(body))
+                Ellipse(pos=(cx - bw / 2, by), size=(bw, bh))
+                Color(*rgba("#ffffff", 0.85))
+                Ellipse(pos=(cx - bw * 0.30, by + bh * 0.08),
+                        size=(bw * 0.6, bh * 0.62))
+
+            # ---- 物种特征 ----
+            if ear == "ears_point":
+                for dx in (-1, 1):
+                    Color(*rgba(shade))
+                    Triangle(points=[cx + dx * r * 0.75, head_y + r * 0.55,
+                                     cx + dx * r * 1.15, head_y + r * 1.55,
+                                     cx + dx * r * 0.10, head_y + r * 0.95])
+            elif ear == "ears_long":
+                for dx in (-1, 1):
+                    Color(*rgba(shade))
+                    Ellipse(pos=(cx + dx * r * 0.55 - r * 0.22, head_y + r * 0.55),
+                            size=(r * 0.44, r * 1.5))
+            elif ear == "ears_round":
+                for dx in (-1, 1):
+                    Color(*rgba("#3a3f4a"))
+                    Ellipse(pos=(cx + dx * r * 0.85 - r * 0.28, head_y + r * 0.55),
+                            size=(r * 0.56, r * 0.56))
+            elif ear == "ears_big":
+                for dx in (-1, 1):
+                    Color(*rgba(shade))
+                    Triangle(points=[cx + dx * r * 0.45, head_y + r * 0.65,
+                                     cx + dx * r * 1.45, head_y + r * 1.75,
+                                     cx + dx * r * 0.05, head_y + r * 0.95])
+            elif ear == "horn":
+                Color(*rgba("#ffd166"))
+                Triangle(points=[cx - r * 0.14, head_y + r * 0.85,
+                                 cx + r * 0.14, head_y + r * 0.85,
+                                 cx, head_y + r * 1.85])
+                for dx in (-1, 1):
+                    Color(*rgba("#efe3ff"))
+                    Ellipse(pos=(cx + dx * r * 0.95 - r * 0.20, head_y + r * 0.60),
+                            size=(r * 0.40, r * 0.40))
+
+            # ---- 头 ----
+            Color(*rgba(shade))
+            Ellipse(pos=(cx - r - dp(1.5), head_y - r - dp(1.5)),
+                    size=(r * 2 + dp(3), r * 2 + dp(3)))
+            Color(*rgba(body))
+            Ellipse(pos=(cx - r, head_y - r), size=(r * 2, r * 2))
+
+            # ---- 眼睛 + 腮红 ----
+            for dx in (-1, 1):
+                Color(*rgba("#2b2f38"))
+                Ellipse(pos=(cx + dx * eye_dx - er, head_y + eye_dy - er),
+                        size=(er * 2, er * 2))
+                Color(*rgba("#ffffff"))
+                Ellipse(pos=(cx + dx * eye_dx - er * 0.3,
+                             head_y + eye_dy + er * 0.15),
+                        size=(er * 0.8, er * 0.8))
+            blush = r * 0.16
+            for dx in (-1, 1):
+                Color(*rgba("#ff8fa3", 0.55))
+                Ellipse(pos=(cx + dx * r * 0.62 - blush,
+                             head_y - r * 0.30 - blush * 0.6),
+                        size=(blush * 2, blush * 1.2))
+
+            # ---- 嘴（开心时上扬）----
+            Color(*rgba("#7a5230"))
+            mw, mh = r * 0.34, r * (0.18 if self.happy else 0.08)
+            my = head_y - r * 0.42
+            if ear == "beak":
+                Color(*rgba("#ff9f43"))
+                Triangle(points=[cx - r * 0.42, my + r * 0.30,
+                                 cx + r * 0.42, my + r * 0.30,
+                                 cx, my - r * 0.05])
+            else:
+                Line(points=[cx - mw / 2, my + (mh if self.happy else 0),
+                             cx, my - mh * 0.6,
+                             cx + mw / 2, my + (mh if self.happy else 0)],
+                     width=max(dp(0.8), r * 0.05))
+
+            # ---- 完全体皇冠 ----
+            if self.stage >= 2:
+                cy0 = head_y + r * (1.95 if ear == "horn" else 1.65)
+                cw = r * 0.9
+                Color(*rgba("#ffd166"))
+                Triangle(points=[cx - cw / 2, cy0, cx + cw / 2, cy0, cx, cy0 + r * 0.75])
+                Color(*rgba("#ffe9a8"))
+                Ellipse(pos=(cx - dp(1.6), cy0 + r * 0.55),
+                        size=(dp(3.2), dp(3.2)))
+
+
+class PickerPopup(Popup):
+    """全屏式选项弹窗：替代 Spinner，竖屏下永远不会显示不全。"""
+
+    def __init__(self, title, values, on_pick, current=None, **kw):
+        Popup.__init__(self, title="", separator_height=0, **kw)
+        self.size_hint = (0.9, 0.82)
+        self.background = ""
+        self.background_color = rgba("#141922")
+        self.values = list(values)
+        self.on_pick = on_pick
+        self.current = current
+
+        root = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
+        head = BoxLayout(size_hint_y=None, height=dp(36))
+        head.add_widget(AppLabel(text="[b]%s[/b]" % title, font_size=sp(17),
+                                 halign="left"))
+        close = PrimaryButton(text="关闭", size_hint_x=None, width=dp(76),
+                              font_size=sp(13), bg=rgba(CARD))
+        close.bind(on_release=lambda x: self.dismiss())
+        head.add_widget(close)
+        root.add_widget(head)
+
+        sv = ScrollView(scroll_type=["bars", "content"], bar_width=dp(6))
+        grid = GridLayout(cols=1, spacing=dp(6), size_hint_y=None,
+                          padding=dp(2))
+        grid.bind(minimum_height=grid.setter("height"))
+        for v in self.values:
+            sel = (v == self.current)
+            b = PrimaryButton(
+                text=("[b]%s[/b]" % v) + ("　[color=%s]√[/color]" % GREEN
+                                          if sel else ""),
+                size_hint_y=None, height=dp(52), font_size=sp(15),
+                bg=rgba(ACCENT if sel else PANEL2), halign="left")
+            b.bind(on_release=lambda x, val=v: self._pick(val))
+            grid.add_widget(b)
+        sv.add_widget(grid)
+        root.add_widget(sv)
+        self.content = root
+
+    def _pick(self, val):
+        self.dismiss()
+        if self.on_pick:
+            self.on_pick(val)

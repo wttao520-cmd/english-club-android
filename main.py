@@ -41,6 +41,7 @@ _step("kivy ok")
 
 # 注意：core/* 的 import 不能放在模块顶层——import 链会触发 app_dir() 建目录，
 # 且顶层异常无法被入口 try 捕获（Android 上表现为静默闪退）。统一在 _run() 内。
+from ui.chat_screen import ChatScreen
 from ui.library_screens import (CoursesScreen, ImportScreen, ReviewScreen,
                                 StatsScreen)
 from ui.phonics_screen import PhonicsScreen
@@ -50,7 +51,7 @@ from ui.theme import BG, BORDER, PANEL, rgba, setup_font
 
 _step("ui ok")
 
-NAV = [("练习", "practice"), ("拼读", "phonics"), ("课程", "courses"),
+NAV = [("练习", "practice"), ("对话", "chat"), ("拼读", "phonics"), ("课程", "courses"),
        ("复习", "review"), ("我的", "me")]
 
 
@@ -99,7 +100,8 @@ class RootWidget(BoxLayout):
 
         self.sm = ScreenManager(transition=SlideTransition(duration=0.18))
         self.screens = {}
-        for cls, name in [(PracticeScreen, "practice"), (PhonicsScreen, "phonics"),
+        for cls, name in [(PracticeScreen, "practice"), (ChatScreen, "chat"),
+                          (PhonicsScreen, "phonics"),
                           (CoursesScreen, "courses"), (ReviewScreen, "review"),
                           (StatsScreen, "stats"), (ImportScreen, "import"),
                           (SettingsScreen, "settings"), (MeScreen, "me")]:
@@ -199,6 +201,8 @@ class EnglishClubApp(App):
             self.screens("me").refresh()
         elif name == "phonics":
             self.screens("phonics").refresh()
+        elif name == "chat":
+            self.screens("chat").refresh()
         for key, btn in self.root_widget.nav_btns.items():
             btn.set_active(key == name)
 
@@ -206,6 +210,11 @@ class EnglishClubApp(App):
         return self.root_widget.screens[name]
 
     # ------------------------------------------------------------ 练习入口
+    def start_lesson(self, course_id, lesson_idx):
+        """闯关模式入口：由课程页的关卡弹窗调用。"""
+        self.goto("practice")
+        self.screens("practice").start_lesson(course_id, lesson_idx)
+
     def start_course(self, course_id, mode=None):
         from core import db
         n = int(self.ctx.config.get("lesson_size", 10)) or 10

@@ -62,6 +62,25 @@ CREATE TABLE IF NOT EXISTS ai_cache (
     value TEXT DEFAULT '',
     created_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS profile (
+    key TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS pet (
+    id INTEGER PRIMARY KEY CHECK (id=0),
+    species TEXT DEFAULT 'cat',
+    name TEXT DEFAULT '团子',
+    exp INTEGER DEFAULT 0,
+    unlocked TEXT DEFAULT '["cat"]'
+);
+CREATE TABLE IF NOT EXISTS lesson_star (
+    course_id INTEGER NOT NULL,
+    lesson_idx INTEGER NOT NULL,
+    stars INTEGER DEFAULT 0,
+    best INTEGER DEFAULT 0,
+    done_at TEXT DEFAULT '',
+    PRIMARY KEY (course_id, lesson_idx)
+);
 CREATE INDEX IF NOT EXISTS idx_sent_course ON sentences(course_id);
 CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(due);
 """
@@ -128,14 +147,20 @@ def delete_course(course_id):
 
 
 def add_sentences(course_id, items):
-    """items: [(en, zh), (en, zh, note) 或 (en, zh, note, phonics)]"""
+    """items: [(en, zh), (en, zh, note) 或 (en, zh, note, phonics)]
+
+    seq 从当前最大值+1 接续：新建课程时从 0 开始，增量补句不与旧句冲突。
+    """
     conn = connect()
+    base = conn.execute(
+        "SELECT COALESCE(MAX(seq), -1) FROM sentences WHERE course_id=?",
+        (course_id,)).fetchone()[0] + 1
     for i, item in enumerate(items):
         parts = (list(item) + ["", "", ""])[:4]
         en, zh, note, phonics = parts
         conn.execute(
             "INSERT INTO sentences (course_id, seq, en, zh, note, phonics) VALUES (?,?,?,?,?,?)",
-            (course_id, i, (en or "").strip(), zh, note, phonics))
+            (course_id, base + i, (en or "").strip(), zh, note, phonics))
     conn.commit()
     conn.close()
 
@@ -361,3 +386,86 @@ def cache_put(key, value):
                  (key, value, today_str()))
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------- 积分/宠物/关卡
+def profile_get(key, default=""):
+    conn = connect()
+    row = conn.execute("SELECT value FROM profile WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def profile_set(key, value):
+    conn = connect()
+    conn.execute("INSERT OR REPLACE INTO profile (key, value) VALUES (?,?)",
+                 (str(key), str(value)))
+    conn.commit()
+    conn.close()
+
+
+def get_points():
+    try:
+        return int(profile_get("points", "0"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_points(n):
+    """积分变动（n 可为负），返回变动后的余额。"""
+    pts = max(0, get_points() + int(n))
+    profile_set("points", pts)
+    return pts
+
+
+def pet_get():
+    conn = connect()
+    conn.execute("INSERT OR IGNORE INTO pet (id) VALUES (0)")
+    row = conn.execute("SELECT * FROM pet WHERE id=0").fetchone()
+    conn.close()
+    return dict(row)
+
+
+def pet_save(species, name, exp, unlocked):
+    import json
+    conn = connect()
+    conn.execute(
+        "UPDATE pet SET species=?, name=?, exp=?, unlocked=? WHERE id=0",
+        (species, name, int(exp), json.dumps(list(unlocked))))
+    conn.commit()
+    conn.close()
+
+
+def lesson_stars(course_id):
+    """返回 {lesson_idx: stars}。"""
+    conn = connect()
+    rows = conn.execute(
+        "SELECT lesson_idx, stars FROM lesson_star WHERE course_id=? AND stars>0",
+        (course_id,)).fetchall()
+    conn.close()
+    return {r["lesson_idx"]: r["stars"] for r in rows}
+
+
+def lesson_save_star(course_id, lesson_idx, stars, best):
+    """保存关卡星级（只升不降）。"""
+    conn = connect()
+    conn.execute(
+        "INSERT INTO lesson_star (course_id, lesson_idx, stars, best, done_at)"
+        " VALUES (?,?,?,?,?)"
+        " ON CONFLICT(course_id, lesson_idx) DO UPDATE SET"
+        " stars=MAX(stars, excluded.stars), best=MAX(best, excluded.best),"
+        " done_at=excluded.done_at",
+        (course_id, lesson_idx, int(stars), int(best), today_str()))
+    conn.commit()
+    conn.close()
+
+
+def sentences_range(course_id, start_seq, end_seq):
+    """按 seq 区间取句（闭区间），用于关卡模式。"""
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM sentences WHERE course_id=? AND seq BETWEEN ? AND ?"
+        " ORDER BY seq, id",
+        (course_id, start_seq, end_seq)).fetchall()
+    conn.close()
+    return rows

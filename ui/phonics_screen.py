@@ -12,8 +12,9 @@ from kivy.uix.widget import Widget
 
 from core import db
 from core.phonics_data import FAMILY_SENTENCES, GROUPS
-from .theme import (ACCENT, BORDER, CARD, GREEN, MUTED, TEXT, YELLOW,
-                    AppLabel, AppTextInput, PrimaryButton, TitleLabel, rgba)
+from .theme import (ACCENT, BORDER, CARD, FONT_NAME, GREEN, MUTED, TEXT,
+                    YELLOW, AppLabel, AppTextInput, PrimaryButton, TitleLabel,
+                    rgba)
 from .widgets import TypingBoard
 
 CARD_BG = rgba("#1c2230")
@@ -63,9 +64,9 @@ class PhonicsScreen(Screen):
         head.add_widget(self.search)
         root.add_widget(head)
 
-        self.tabs = TabbedPanel(do_default_tab=False, tab_width=dp(120),
+        self.tabs = TabbedPanel(do_default_tab=False, tab_width=dp(140),
+                                tab_height=dp(42),
                                 background_color=rgba("#0e1116"))
-        self.tabs.tab_height = dp(40)
         root.add_widget(self.tabs)
 
         bar = BoxLayout(size_hint_y=None, height=dp(46))
@@ -81,10 +82,10 @@ class PhonicsScreen(Screen):
     def refresh(self):
         self.tabs.clear_tabs()
         for g in self.groups:
-            item = TabbedPanelItem(text=g["title"])
+            item = TabbedPanelItem(text=g["title"], font_name=FONT_NAME)
             item.add_widget(self._group_scroll(g))
             self.tabs.add_widget(item)
-        item = TabbedPanelItem(text="词族短句")
+        item = TabbedPanelItem(text="词族短句", font_name=FONT_NAME)
         item.add_widget(self._family_scroll())
         self.tabs.add_widget(item)
         if self.tabs.tab_list:

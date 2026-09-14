@@ -55,6 +55,7 @@ def schedule(card, quality):
             card.interval = 6.0
         else:
             card.interval = round(card.interval * card.ease, 2)
+        card.interval = min(card.interval, 365.0)  # 封顶一年，防日期溢出
         card.reps += 1
         card.ease = round(max(1.3, card.ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))), 4)
         card.due = (datetime.date.today() + datetime.timedelta(days=card.interval)).isoformat()

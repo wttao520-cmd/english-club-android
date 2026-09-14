@@ -177,6 +177,43 @@ class MeScreen(Screen):
                                  height=dp(70), halign="left")
         root.add_widget(self.overview)
 
+        # 宠物乐园入口（大卡片）
+        from .pet_screen import PetEntry
+        from .widgets import PetWidget
+        import core.pet as pet_mod
+        st = pet_mod.load()
+        pet_card = BoxLayout(orientation="horizontal", padding=dp(10),
+                             spacing=dp(10), size_hint_y=None, height=dp(84))
+        with pet_card.canvas.before:
+            from kivy.graphics import Color, RoundedRectangle
+            Color(*rgba("#1c2230"))
+            pet_card._rect = RoundedRectangle(pos=pet_card.pos,
+                                              size=pet_card.size,
+                                              radius=[dp(12)])
+        pet_card.bind(pos=lambda o, v: setattr(o._rect, "pos", v),
+                      size=lambda o, v: setattr(o._rect, "size", v))
+        pet_card.add_widget(PetWidget(species=st.species, stage=st.stage,
+                                      size_hint=(None, None),
+                                      size=(dp(64), dp(64)), happy=True))
+        from kivy.uix.behaviors import ButtonBehavior
+        info = BoxLayout(orientation="vertical")
+        info.add_widget(AppLabel(text="[b]宠物乐园[/b]", font_size=sp(16),
+                                 size_hint_y=None, height=dp(26), halign="left"))
+        info.add_widget(AppLabel(
+            text="%s · Lv.%d · %s\n练得越多，吃得越饱" % (
+                pet_mod.species_name(st.species), st.level,
+                pet_mod.stage_name(st.stage)),
+            font_size=sp(12), color=rgba("#8b949e"), halign="left"))
+        pet_card.add_widget(info)
+        tap = ButtonBehavior
+        self._pet_tap = PetEntry()
+        self._pet_tap.opacity = 0
+        self._pet_tap.size_hint_y = None
+        self._pet_tap.height = dp(1)
+        pet_card.add_widget(self._pet_tap)
+        pet_card.bind(on_touch_down=self._on_pet_touch)
+        root.add_widget(pet_card)
+
         for text, screen, color in [("学习统计", "stats", BLUE),
                                     ("导入内容", "import", GREEN),
                                     ("设置（AI / 练习 / 数据）", "settings", ACCENT)]:
@@ -190,6 +227,15 @@ class MeScreen(Screen):
                                  font_size=sp(11), color=rgba(MUTED),
                                  size_hint_y=None, height=dp(40), halign="center"))
         self.add_widget(root)
+
+    def _on_pet_touch(self, w, touch):
+        if w.collide_point(*touch.pos) and touch.button == "left":
+            from .pet_screen import PetPopup
+            p = PetPopup()
+            p.bind(on_dismiss=lambda x: self.refresh())
+            p.open()
+            return True
+        return False
 
     def _goto(self, name):
         app = App.get_running_app()

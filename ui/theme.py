@@ -41,6 +41,7 @@ def rgba(hex_color, a=1.0):
 
 # ------------------------------------------------------------------ 字体
 FONT_NAME = "AppFont"
+IPA_FONT_NAME = "IPAFont"  # 国际音标专用（中文子集字体无 IPA 字形）
 
 _FONT_CANDIDATES = [
     # 打包进 APK 的简体子集（推荐，tools/build_font.py 生成）
@@ -104,12 +105,30 @@ def setup_font(app_dir=None):
     try:
         if path:
             LabelBase.register(FONT_NAME, fn_regular=path)
-            return path
-        # 全部落空：用 Kivy 自带 Roboto 兜底，绝不返回未注册状态
-        from kivy import kivy_data_dir
-        LabelBase.register(
-            FONT_NAME, fn_regular=os.path.join(kivy_data_dir, "fonts", "Roboto.ttf"))
-        return None
+        else:
+            # 全部落空：用 Kivy 自带 Roboto 兜底，绝不返回未注册状态
+            from kivy import kivy_data_dir
+            path = os.path.join(kivy_data_dir, "fonts", "Roboto.ttf")
+            LabelBase.register(FONT_NAME, fn_regular=path)
+
+        # IPA 音标专用字体：中文子集字体不含国际音标字形
+        ipa_candidates = []
+        try:
+            ipa_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ipa_candidates.append(os.path.join(
+                ipa_root, "assets", "fonts", "IPAFont-Subset.ttf"))
+        except Exception:
+            pass
+        ipa_candidates += [
+            "/system/fonts/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        ipa = _first_existing(ipa_candidates)
+        if ipa:
+            LabelBase.register(IPA_FONT_NAME, fn_regular=ipa)
+        else:
+            LabelBase.register(IPA_FONT_NAME, fn_regular=path)
+        return path
     except Exception:
         return None
 
@@ -166,7 +185,8 @@ class PrimaryButton(ButtonBehavior, BoxLayout):
     font_size = NumericProperty(sp(15))
 
     def __init__(self, **kw):
-        self._lbl = AppLabel(halign="center", valign="middle")
+        self._halign = kw.pop("halign", "center")
+        self._lbl = AppLabel(halign=self._halign, valign="middle")
         bg = kw.pop("bg", None)
         BoxLayout.__init__(self, **kw)
         ButtonBehavior.__init__(self, **kw)
@@ -182,8 +202,10 @@ class PrimaryButton(ButtonBehavior, BoxLayout):
         self._lbl.text = self.text
         self._lbl.color = self.fg
         self._lbl.font_size = self.font_size
+        self._lbl.halign = getattr(self, "_halign", "center")
         self._lbl.pos = self.pos
         self._lbl.size = self.size
+        self._lbl.text_size = self.size
 
     def on_bg(self, *a):
         self._paint()
