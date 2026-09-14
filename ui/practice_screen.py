@@ -56,8 +56,8 @@ class AIPanel(Popup):
         root.add_widget(self.inp)
 
         bar = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        for text, cb in [("讲解本句", lambda: self.screen._ai_explain(self)),
-                         ("翻译本句", lambda: self.screen._ai_translate(self)),
+        for text, cb in [("讲解本句", lambda x: self.screen._ai_explain(self)),
+                         ("翻译本句", lambda x: self.screen._ai_translate(self)),
                          ("提问", self._ask)]:
             b = PrimaryButton(text=text, size_hint_x=0.33)
             b.bind(on_release=cb)
