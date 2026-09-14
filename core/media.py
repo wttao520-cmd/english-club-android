@@ -9,8 +9,10 @@ Android（pyjnius 原生实现，无 Kivy Sound）：
     或 android.speech.tts.TextToSpeech（原生 TTS，离线可用、零延迟）
     —— 原生 TTS 优先，网络不可用时仍能朗读。
 
-桌面 / 其他（Kivy SoundLoader）：
-  - 仅在 Kivy <= 2.3.0 启用。2.3.1 的 audio_sdl2 存在 load 死锁问题
+桌面 / 其他：
+  - 朗读：外部播放器子进程（ffplay/mpv），彻底绕开 Kivy 音频，
+    还能播放 SoundLoader 解不了的 mp3；未装播放器时静默禁用。
+  - 音效：仅在 Kivy <= 2.3.0 启用。2.3.1 的 audio_sdl2 存在 load 死锁问题
     （Cython 扩展持 GIL 死锁会冻结全进程，线程隔离无效），故禁用。
 
 所有对外方法均不抛异常、不阻塞主线程超过毫秒级。
@@ -19,7 +21,10 @@ Android（pyjnius 原生实现，无 Kivy Sound）：
 import hashlib
 import os
 import re
+import shutil
+import subprocess
 import threading
+import time
 
 import requests
 from kivy.logger import Logger
@@ -28,7 +33,6 @@ from kivy.utils import platform as _kivy_platform
 from .config import app_dir
 
 CACHE_DIR = os.path.join(app_dir(), "tts")
-TTS_URL = "https://dict.youdao.com/dictvoice?type=2&audio=%s"
 
 TONE = {
     "key": (760.0, 0.035, 0.22),
@@ -77,16 +81,35 @@ def _make_wav(path, freq, dur, vol):
         w.writeframes(bytes(data))
 
 
-def _download(text):
+def _download(text, voice=2, timeout=10, retries=2):
+    """下载有道发音到缓存（带重试与换音色兜底）。成功返回路径，失败返回 None。"""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = _cache_path(text)
+    url = "https://dict.youdao.com/dictvoice?type=%d&audio=%s"
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(url % (voice, requests.utils.quote(text)),
+                                timeout=timeout)
+            if resp.status_code == 200 and len(resp.content) > 1024:
+                with open(path, "wb") as f:
+                    f.write(resp.content)
+                return path
+            Logger.info("Speaker: http=%s len=%s (attempt %d)"
+                        % (resp.status_code, len(resp.content), attempt))
+        except Exception as e:
+            Logger.info("Speaker: download failed %s (attempt %d)"
+                        % (e, attempt))
+    # 换英式/美式音色再兜底一轮：个别内容单音色接口偶发 403/空响应
+    other = 1 if voice == 2 else 2
     try:
-        resp = requests.get(TTS_URL % requests.utils.quote(text), timeout=6)
+        resp = requests.get(url % (other, requests.utils.quote(text)),
+                            timeout=timeout)
         if resp.status_code == 200 and len(resp.content) > 1024:
-            path = _cache_path(text)
             with open(path, "wb") as f:
                 f.write(resp.content)
             return path
     except Exception as e:
-        Logger.info("Speaker: download failed %s" % e)
+        Logger.info("Speaker: fallback voice failed %s" % e)
     return None
 
 
@@ -142,31 +165,48 @@ if _IS_ANDROID:
 
         def __init__(self):
             self._lock = threading.Lock()
+            self._gen = 0  # 代际号：新一次 say() 让上一次提前退场，避免锁排队
 
         def say(self, text):
             text = (text or "").strip()
             if not text:
                 return False
-            threading.Thread(target=self._play, args=(text,),
-                             daemon=True).start()
+            self._gen += 1
+            threading.Thread(target=self._play,
+                             args=(text, self._gen), daemon=True).start()
             return True
 
-        def _play(self, text):
+        def _play(self, text, gen):
             with self._lock:  # 串行播放，避免多个 MediaPlayer 并发
+                if gen != self._gen:
+                    return  # 已有更新的播放请求，本次放弃
                 try:
                     path = _cache_path(text)
                     if not os.path.exists(path) or os.path.getsize(path) < 1024:
                         path = _download(text)
                         if path is None:
+                            Logger.info(
+                                "Speaker(android): no audio for %r"
+                                % text[:40])
                             return
                     mp = _MediaPlayer()
                     try:
                         mp.setDataSource(path)
                         mp.prepare()
                         mp.start()
-                        # 等待播放结束（wav 时长已知上限 10s），随后释放
-                        import time
-                        time.sleep(min(10, 1.5 + len(text) * 0.09))
+                        # 轮询真实播放状态：播完立即释放；最长 20s 防卡死。
+                        # （旧实现按字符数估算固定 sleep，长句被切、且锁被
+                        #   占满导致下一次点击排队无声。）
+                        deadline = time.time() + 20
+                        while time.time() < deadline:
+                            if gen != self._gen:
+                                break
+                            try:
+                                if not mp.isPlaying():
+                                    break
+                            except Exception:
+                                pass  # 个别 ROM isPlaying 异常时按满时长兜底
+                            time.sleep(0.2)
                     finally:
                         try:
                             mp.stop()
@@ -187,10 +227,18 @@ if _IS_ANDROID:
     Speaker = _AndroidSpeaker
 
 # ==================================================================
-# 桌面实现（Kivy SoundLoader；2.3.1+ 因 load 死锁禁用音频）
+# 桌面实现
+# 音效仍走 Kivy SoundLoader（2.3.1+ 默认禁用，规避 audio_sdl2 load 死锁）；
+# 朗读改调外部播放器子进程（ffplay/mpv）：无死锁风险，且支持 Kivy 解不了的 mp3。
 # ==================================================================
 else:
     from kivy.core.audio import SoundLoader
+
+    _PLAYER = None
+    for _exe in ("ffplay", "mpv"):
+        if shutil.which(_exe):
+            _PLAYER = _exe
+            break
 
     class _DesktopSfx(object):
         def __init__(self, enabled=True):
@@ -227,23 +275,34 @@ else:
 
     class _DesktopSpeaker(object):
         def __init__(self):
-            self.disabled = _IS_KIVY_231
+            self._exe = _PLAYER
+            if not self._exe:
+                Logger.info("Speaker: 未找到 ffplay/mpv，桌面朗读不可用")
 
         def say(self, text):
-            if self.disabled or not (text or "").strip():
+            text = (text or "").strip()
+            if not text or not self._exe:
                 return False
+
             def work():
                 try:
-                    text2 = text.strip()
-                    path = _cache_path(text2)
-                    if not os.path.exists(path) or os.path.getsize(path) < 1024:
-                        path = _download(text2)
-                    if path:
-                        snd = SoundLoader.load(path)
-                        if snd:
-                            snd.play()
+                    path = _cache_path(text)
+                    if not os.path.exists(path) \
+                            or os.path.getsize(path) < 1024:
+                        path = _download(text)
+                    if not path:
+                        Logger.info("Speaker: no audio for %r" % text[:40])
+                        return
+                    if self._exe == "ffplay":
+                        cmd = ["ffplay", "-nodisp", "-autoexit",
+                               "-loglevel", "quiet", path]
+                    else:
+                        cmd = ["mpv", "--no-video", "--really-quiet", path]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=30)
                 except Exception as e:
                     Logger.info("Speaker: play failed %s" % e)
+
             threading.Thread(target=work, daemon=True).start()
             return True
 
