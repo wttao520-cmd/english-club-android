@@ -251,6 +251,7 @@ class FlowLayout(BoxLayout):
         # size_hint_x=1 让 ScrollView 自动把宽度设为视口宽度；
         # size_hint_y=None + 自身 height 让高度按内容自适应。
         kw.setdefault("size_hint", (1, None))
+        self.valign = kw.pop("valign", "top")   # top | bottom | center
         BoxLayout.__init__(self, **kw)
         self._h = dp(40)
         self.bind(width=self._on_width, children=self._on_children)
@@ -275,48 +276,64 @@ class FlowLayout(BoxLayout):
     def _avail(self):
         return max(dp(20), self.width - self.padding[0] - self.padding[2])
 
+    def _offset(self, inner_h):
+        """内容顶部相对容器顶部的内缩量（inner_h 为不含 padding 的纯内容高度）。
+
+        返回 0 表示内容贴顶；返回 extra 表示内容贴底（贴近拇指）。
+        """
+        extra = self.height - inner_h - self.padding[1] - self.padding[3]
+        if extra <= 0:
+            return 0.0
+        if self.valign == "bottom":
+            return extra
+        if self.valign == "center":
+            return extra / 2.0
+        return 0.0
+
+    def _rows(self, avail):
+        """按宽度切行，返回每行的子项列表（顺序为添加顺序）。"""
+        rows = []
+        x = 0.0
+        for ch in reversed(self.children):
+            w = max(dp(1), ch.width)
+            if not rows or (x > 0 and x + w > avail + 0.5):
+                rows.append([])
+                x = 0.0
+            rows[-1].append(ch)
+            x += w + self.spacing
+        return rows
+
     def _relayout(self, *a):
         if getattr(self, "_in_layout", False):
             return
         self._in_layout = True
         try:
             avail = self._avail()
-            x = y = 0.0
-            row_h = 0.0
-            for ch in reversed(self.children):  # BoxLayout 子项倒序存储
-                w = max(dp(1), ch.width)
-                h = ch.height
-                if x > 0 and x + w > avail + 0.5:
-                    x = 0.0
-                    y += row_h + self.spacing
-                    row_h = 0.0
-                ch.pos = (self.x + self.padding[0] + x,
-                          self.y + self.height - self.padding[1] - y - h)
-                x += w + self.spacing
-                row_h = max(row_h, h)
-            total = y + row_h + self.padding[1] + self.padding[3]
-            if abs(total - self._h) > 0.5:
-                self._h = total
-                self.height = total
-                # 高度变化后需按新高度重摆一次，避免 y 坐标基于旧高度
-                self._place(avail)
+            rows = self._rows(avail)
+            inner_h = sum(max(ch.height for ch in r) for r in rows if r)
+            inner_h += self.spacing * max(0, len(rows) - 1)
+            content_h = inner_h + self.padding[1] + self.padding[3]
+            # 固定高度模式下按内容自增高
+            if self.size_hint_y is None and abs(content_h - self._h) > 0.5:
+                self._h = content_h
+                self.height = content_h
+            self._place(avail, rows, inner_h)
         finally:
             self._in_layout = False
 
-    def _place(self, avail):
-        x = y = 0.0
-        row_h = 0.0
-        for ch in reversed(self.children):
-            w = max(dp(1), ch.width)
-            h = ch.height
-            if x > 0 and x + w > avail + 0.5:
-                x = 0.0
-                y += row_h + self.spacing
-                row_h = 0.0
-            ch.pos = (self.x + self.padding[0] + x,
-                      self.y + self.height - self.padding[1] - y - h)
-            x += w + self.spacing
-            row_h = max(row_h, h)
+    def _place(self, avail, rows, inner_h):
+        # 内容顶部基准 y：bottom 时整体下沉到底部（贴近拇指）
+        base = self.y + self.height - self.padding[1] - self._offset(inner_h)
+        y = 0.0
+        for row in rows:
+            if not row:
+                continue
+            rh = max(ch.height for ch in row)
+            x = 0.0
+            for ch in row:
+                ch.pos = (self.x + self.padding[0] + x, base - y - ch.height)
+                x += max(dp(1), ch.width) + self.spacing
+            y += rh + self.spacing
 
 
 class WordTile(PrimaryButton):
@@ -354,27 +371,34 @@ class WordChoiceBoard(BoxLayout):
         self.on_pick = on_pick
         self.on_undo = on_undo
 
-        # 已填入区
-        self.slots = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6),
-                               padding=[dp(4), dp(2)])
-        filled_wrap = ScrollView(size_hint_y=None, height=dp(56),
-                                scroll_type=["bars", "content"], bar_width=dp(4),
-                                do_scroll_y=False)
-        self.slots.bind(minimum_width=self.slots.setter("width"))
+        # 已填入区：流式排列（长句自动多行）。这里用普通容器而非 ScrollView，
+        # 避免 ScrollView 在内容不超过视口时把子项 y 放到 0 干扰对齐。
+        self._slots_min = dp(88)
+        self.slots = FlowLayout(spacing=dp(5), padding=dp(2), valign="top",
+                                size_hint=(1, None))
+        filled_wrap = BoxLayout(size_hint_y=None, height=self._slots_min)
         filled_wrap.add_widget(self.slots)
         self._filled_wrap = filled_wrap
         self.add_widget(filled_wrap)
+        self.slots.bind(height=self._sync_slots_height)
 
-        # 词库区：流式排列，词块按文字宽度自动换行，不占整行
-        self.pool_wrap = ScrollView(scroll_type=["bars", "content"],
-                                    bar_width=dp(4), do_scroll_x=False)
-        self.pool = FlowLayout(spacing=dp(5), padding=dp(2))
+        # 词库区：流式排列，词块按文字宽度自动换行；
+        # 容器撑满剩余空间，valign=bottom 让词块沉到底部（贴近拇指，好点）。
+        self.pool_wrap = BoxLayout()
+        self.pool = FlowLayout(spacing=dp(5), padding=dp(2), valign="bottom",
+                               size_hint=(1, 1))
         self.pool_wrap.add_widget(self.pool)
         self.add_widget(self.pool_wrap)
-        # FlowLayout 用 size_hint_x=1，ScrollView 会自动把其宽度设为视口宽度，
-        # 因此无需手动同步；这里保留一个空实现供测试兼容。
         self.pool_wrap.bind(width=self._sync_pool_width)
         self._sync_pool_width()
+
+    def _sync_slots_height(self, *a):
+        """槽位区高度跟随内容（多行时变高，句子长也能看全）。"""
+        need = max(self._slots_min, self.slots.height + dp(8))
+        cap = max(self._slots_min, self.height * 0.45)
+        h = min(need, cap)
+        if abs(h - self._filled_wrap.height) > 1:
+            self._filled_wrap.height = h
 
     def _sync_pool_width(self, *a):
         """width 由 size_hint_x=1 + ScrollView 自动管理；触发一次重排即可。"""

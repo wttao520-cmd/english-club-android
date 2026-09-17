@@ -159,10 +159,12 @@ class PracticeScreen(Screen):
         row2.add_widget(self.time_lbl)
         root.add_widget(row2)
 
-        # 中文提示（题干）
+        # 中文提示（题干）：高度按内容自适应，长句自动多行不截断
         self.zh_lbl = AppLabel(text="像玩游戏一样，用句子学英语", font_size=sp(19),
                                bold=True, halign="center", size_hint_y=None,
                                height=dp(48), color=rgba(TEXT))
+        self.zh_lbl.bind(texture_size=self._sync_zh_height)
+        self.zh_lbl.bind(width=self._sync_zh_height)
         root.add_widget(self.zh_lbl)
 
         # 音标行（词汇课程显示，IPAFont 专用字体）
@@ -381,6 +383,17 @@ class PracticeScreen(Screen):
             return self._mode
         return "choice" if self._mode == "choice" else "typing"
 
+    def _sync_zh_height(self, *a):
+        """题干高度按文字实际行数自适应（长句多行显示，不截断）。"""
+        lbl = self.zh_lbl
+        try:
+            lbl.text_size = (max(dp(40), lbl.width), None)
+            h = max(dp(40), lbl.texture_size[1] + dp(8))
+        except Exception:
+            h = dp(48)
+        if abs(h - lbl.height) > 1:
+            lbl.height = h
+
     def _apply_mode_visibility(self):
         """按当前模式切换答题控件：把当前模式用的那块放进弹性答题区。
 
@@ -429,6 +442,7 @@ class PracticeScreen(Screen):
             return
         if ok:
             self.ctx.sfx.play("key")
+            self._speak_word(text)   # 选对一个词就朗读该词
             self._render()
             if st.finished:
                 self._on_sentence_done()
@@ -614,6 +628,14 @@ class PracticeScreen(Screen):
             return
         if self.session and self.session.current:
             self.ctx.speaker.say(self.session.current["en"])
+
+    def _speak_word(self, word):
+        """朗读单个词（选词模式选对时调用）；去掉尾部标点再读。"""
+        if not self.ctx.config.get("tts_enabled", True):
+            return
+        w = (word or "").strip().strip(",.;:!?\"'()[]")
+        if w:
+            self.ctx.speaker.say(w)
 
     def _finish_session(self):
         summary = self.session.summary()
