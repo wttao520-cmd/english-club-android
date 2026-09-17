@@ -155,7 +155,9 @@ class TypingBoard(Widget):
             return
 
         items, cw, line_h, _gap = self._layout()
-        if items:
+        # 仅固定高度模式（size_hint_y=None）下按内容自增高；
+        # 弹性填满时由父容器决定高度，避免布局抖动。
+        if items and self.size_hint_y is None:
             need = (self.y + self.height - items[-1][2]) + dp(16)
             h = max(self.min_height, need)
             if abs(h - self.height) > 1:
@@ -228,6 +230,237 @@ class TypingBoard(Widget):
                 it = items[cursor]
                 Color(*rgba(ACCENT))
                 Rectangle(pos=(it[1], it[2] + it[4] * 0.9), size=(it[3] - dp(2), dp(2)))
+
+
+class FlowLayout(BoxLayout):
+    """流式布局：子控件按自身宽度从左到右排列，放不下自动换行。
+
+    子控件需 size_hint=(None, None) 并自带 width/height；容器高度按内容自适应。
+
+    可用宽度来源（按优先级）：
+      1. 外部显式设置的 width（非 100 默认值）；
+      2. 父级 ScrollView 的宽度（自动探测）。
+    这样即便放在 ScrollView 里（Kivy 不会自动给 size_hint=(None,None) 的子项
+    分配宽度），也能拿到正确宽度进行换行。
+    """
+
+    def __init__(self, **kw):
+        kw.setdefault("orientation", "horizontal")
+        kw.setdefault("spacing", dp(6))
+        kw.setdefault("padding", dp(4))
+        # size_hint_x=1 让 ScrollView 自动把宽度设为视口宽度；
+        # size_hint_y=None + 自身 height 让高度按内容自适应。
+        kw.setdefault("size_hint", (1, None))
+        BoxLayout.__init__(self, **kw)
+        self._h = dp(40)
+        self.bind(width=self._on_width, children=self._on_children)
+        self.height = self._h
+
+    def _on_width(self, *a):
+        self._relayout()
+
+    def _on_children(self, *a):
+        # 新加的 tile 其 width 在 add_widget 之后才设定，
+        # 故监听每个子项的 width/height 变化，任一变化都重排。
+        for ch in self.children:
+            if not getattr(ch, "_flow_bound", False):
+                ch._flow_bound = True
+                ch.bind(width=self._relayout, height=self._relayout)
+        self._relayout()
+
+    def do_layout(self, *a):
+        """接管布局：BoxLayout 会把子项排成一行，这里改为流式换行。"""
+        self._relayout()
+
+    def _avail(self):
+        return max(dp(20), self.width - self.padding[0] - self.padding[2])
+
+    def _relayout(self, *a):
+        if getattr(self, "_in_layout", False):
+            return
+        self._in_layout = True
+        try:
+            avail = self._avail()
+            x = y = 0.0
+            row_h = 0.0
+            for ch in reversed(self.children):  # BoxLayout 子项倒序存储
+                w = max(dp(1), ch.width)
+                h = ch.height
+                if x > 0 and x + w > avail + 0.5:
+                    x = 0.0
+                    y += row_h + self.spacing
+                    row_h = 0.0
+                ch.pos = (self.x + self.padding[0] + x,
+                          self.y + self.height - self.padding[1] - y - h)
+                x += w + self.spacing
+                row_h = max(row_h, h)
+            total = y + row_h + self.padding[1] + self.padding[3]
+            if abs(total - self._h) > 0.5:
+                self._h = total
+                self.height = total
+                # 高度变化后需按新高度重摆一次，避免 y 坐标基于旧高度
+                self._place(avail)
+        finally:
+            self._in_layout = False
+
+    def _place(self, avail):
+        x = y = 0.0
+        row_h = 0.0
+        for ch in reversed(self.children):
+            w = max(dp(1), ch.width)
+            h = ch.height
+            if x > 0 and x + w > avail + 0.5:
+                x = 0.0
+                y += row_h + self.spacing
+                row_h = 0.0
+            ch.pos = (self.x + self.padding[0] + x,
+                      self.y + self.height - self.padding[1] - y - h)
+            x += w + self.spacing
+            row_h = max(row_h, h)
+
+
+class WordTile(PrimaryButton):
+    """选词模式中的一个可点词块。"""
+
+    def __init__(self, text, on_pick, **kw):
+        kw.setdefault("text", text)
+        kw.setdefault("font_size", sp(14))
+        kw.setdefault("size_hint", (None, None))
+        kw.setdefault("bg", rgba(PANEL2))
+        PrimaryButton.__init__(self, **kw)
+        self._on_pick = on_pick
+        self._base_bg = self.bg
+        self.bind(on_release=lambda b: self._on_pick(self))
+
+    def set_bg(self, color):
+        self.bg = rgba(color)
+
+    def reset_bg(self):
+        self.bg = self._base_bg
+
+
+class WordChoiceBoard(BoxLayout):
+    """选词模式答题区：
+
+    上排「已填入区」按顺序显示选中的词（点击可取回），
+    下排「词库区」用流式布局展示候选词块（按文字宽度自动换行），
+    点击词块即自动填入下一个空位。
+    """
+
+    def __init__(self, on_pick, on_undo, **kw):
+        kw.setdefault("orientation", "vertical")
+        kw.setdefault("spacing", dp(8))
+        BoxLayout.__init__(self, **kw)
+        self.on_pick = on_pick
+        self.on_undo = on_undo
+
+        # 已填入区
+        self.slots = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6),
+                               padding=[dp(4), dp(2)])
+        filled_wrap = ScrollView(size_hint_y=None, height=dp(56),
+                                scroll_type=["bars", "content"], bar_width=dp(4),
+                                do_scroll_y=False)
+        self.slots.bind(minimum_width=self.slots.setter("width"))
+        filled_wrap.add_widget(self.slots)
+        self._filled_wrap = filled_wrap
+        self.add_widget(filled_wrap)
+
+        # 词库区：流式排列，词块按文字宽度自动换行，不占整行
+        self.pool_wrap = ScrollView(scroll_type=["bars", "content"],
+                                    bar_width=dp(4), do_scroll_x=False)
+        self.pool = FlowLayout(spacing=dp(5), padding=dp(2))
+        self.pool_wrap.add_widget(self.pool)
+        self.add_widget(self.pool_wrap)
+        # FlowLayout 用 size_hint_x=1，ScrollView 会自动把其宽度设为视口宽度，
+        # 因此无需手动同步；这里保留一个空实现供测试兼容。
+        self.pool_wrap.bind(width=self._sync_pool_width)
+        self._sync_pool_width()
+
+    def _sync_pool_width(self, *a):
+        """width 由 size_hint_x=1 + ScrollView 自动管理；触发一次重排即可。"""
+        if self.pool.width > 0:
+            self.pool._relayout()
+
+    # ---------------------------------------------------------- 渲染
+    def show(self, words, placed, pool, used=None, wrong_text=None):
+        """渲染选中槽位与词库。
+
+        words: [(词, 空白)] 当前句词序；placed: 已正确填入词数；
+        pool: 乱序后的「完整候选池」（顺序固定，不随选择变化）；
+        used: 已被选走的词列表（用于把对应词块隐藏，其余词块位置不动）。
+        """
+        self._words = list(words)
+        self._placed = placed
+
+        # ---- 上排槽位 ----
+        self.slots.clear_widgets()
+        for i, (w, _sp) in enumerate(self._words):
+            if i < placed:
+                t = PrimaryButton(text=w, font_size=sp(14), size_hint=(None, None),
+                                  bg=rgba(GREEN))
+                t.height = dp(38)
+                t.width = self._btn_width(t, w)
+                t.bind(on_release=lambda b, idx=i: self.on_undo(idx))
+                self.slots.add_widget(t)
+            else:
+                chip = PrimaryButton(text="", font_size=sp(14),
+                                     size_hint=(None, None), width=dp(44),
+                                     height=dp(38), bg=rgba("#141922"))
+                self.slots.add_widget(chip)
+        if not self._words:
+            self.slots.add_widget(AppLabel(
+                text="（本句没有可选的词）", color=rgba(MUTED),
+                size_hint_y=None, height=dp(34)))
+
+        # ---- 下排词库：池签名不变时复用已有词块，只切换显隐，位置绝不跳变 ----
+        pool = list(pool)
+        sig = tuple(pool)
+        if getattr(self, "_pool_sig", None) != sig:
+            self.pool.clear_widgets()
+            for w in pool:
+                tile = WordTile(w, self._tile_pressed)
+                tile.height = dp(36)
+                tile.width = self._btn_width(tile, w)
+                self.pool.add_widget(tile)
+            self._pool_sig = sig
+        # 按 used 计数隐藏对应词块（保留顺序，其它词块不动）
+        used = list(used or [])
+        hidden = {}
+        for w in used:
+            hidden[w] = hidden.get(w, 0) + 1
+        for tile in self.pool.children:
+            # 已选走的词块：透明+不可点，但**保留原有宽高占位**，
+            # 这样其余词块不会左移填补空位——位置保持不动。
+            n = hidden.get(tile.text, 0)
+            if n > 0:
+                hidden[tile.text] = n - 1
+                tile.opacity = 0
+                tile.disabled = True
+            else:
+                tile.opacity = 1
+                tile.disabled = False
+
+        self._pool_words = pool
+        self._sync_pool_width()
+        self.pool._relayout()
+
+    @staticmethod
+    def _btn_width(btn, text):
+        """按文字实际宽度自适应按钮宽度，并封顶。
+
+        PrimaryButton 内部的 Label 的 text_size 会跟随按钮尺寸（循环依赖），
+        直接用它的 texture_size 会得到错误宽度，故用 CoreLabel 单独量文字。
+        """
+        try:
+            lbl = CoreLabel(text=text, font_name=FONT_NAME, font_size=sp(14))
+            lbl.refresh()
+            tw = lbl.texture.width
+        except Exception:
+            tw = dp(len(text) * 8)
+        return min(dp(180), max(dp(34), tw + dp(18)))
+
+    def _tile_pressed(self, tile):
+        self.on_pick(tile.text, tile)
 
 
 class ComboBadge(Widget):

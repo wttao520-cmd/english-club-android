@@ -224,7 +224,7 @@ class EnglishClubApp(App):
         course = db.get_course(course_id)
         key = course["builtin_key"] if course else ""
         if mode is None and key.startswith("vocab_"):
-            mode = "word"  # 词汇课程：默认打单词
+            mode = "choice"  # 词汇课程：默认选词（手机免键盘）
         self.start_sentences(rows, course["title"] if course else "练习", mode)
 
     def start_sentences(self, rows, title, mode=None):

@@ -12,7 +12,8 @@ DEFAULT_CONFIG = {
     "ai_api_key": "",
     "ai_model": "deepseek-chat",
     # ---- 练习 ----
-    "mode": "sentence",        # word | sentence | dictation
+    "mode": "choice",          # 选词模式（默认，手机免键盘点选拼句）
+                               # word | sentence | dictation | phonics | choice
     "lesson_size": 10,         # 每关句子数
     "auto_next": True,         # 完成后自动进入下一句
     "sound_enabled": True,     # 输入音效
