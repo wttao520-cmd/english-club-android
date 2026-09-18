@@ -559,7 +559,7 @@ def _():
     assert got2.get("ok") == 2
 
 
-@case("拼读页音素卡片：跟读按钮存在且读的是该音素的纯音示范词")
+@case("拼读页音素卡片：跟读按钮存在且读出音素本身（非整词/字母名）")
 def _():
     from main import EnglishClubApp
     app = EnglishClubApp()
@@ -599,29 +599,38 @@ def _():
     horns[0].dispatch("on_release")
     want = phoneme_sound(entry)
     assert spoken == [want], \
-        "跟读应朗读纯音示范词 %r，实际 %r" % (want, spoken)
+        "跟读应朗读音素写法 %r，实际 %r" % (want, spoken)
     assert want != entry["words"][0][0], \
-        "跟读读的是纯音示范词，不应等于整词 %r" % want
+        "跟读读的是音素本身，不应等于整词 %r" % want
 
-    # 关键音素必须命中"纯音"表，而不是退化成整词
-    # （/æ/→at 而非 apple；/ʃ/→shh 而非 ship）
+    # 关键音素必须命中音素表，而不是退化成整词或"最小示范词"
+    # （/æ/→a、/ʃ/→sh、/b/→b。曾用 at/shh/ba 这类示范词，实测会被
+    #  有道当成缩写词或整词念，读出来的不是该音素。）
     from core.phonics_data import GROUPS, FAMILY_SENTENCES
-    expect = {"/æ/": "at", "/ʌ/": "up", "/ʃ/": "shh", "/θ/": "think",
-              "/iː/": "see", "/eɪ/": "say", "/ŋ/": "sing"}
+    expect = {"/æ/": "a", "/ʌ/": "u", "/ɪ/": "i", "/ɒ/": "o",
+              "/ʃ/": "sh", "/θ/": "th", "/b/": "b", "/t/": "t",
+              "/iː/": "ee", "/eɪ/": "ay", "/ŋ/": "ng", "/ks/": "x"}
     seen = {}
     for g in GROUPS:
         for e in g["entries"]:
             seen.setdefault(e["ipa"], set()).add(phoneme_sound(e))
-    for ipa, want in expect.items():
+    for ipa, want2 in expect.items():
         assert ipa in seen, "缺少音素 %s" % ipa
-        assert want in seen[ipa], \
-            "%s 应由纯音表给 %r，实际 %r" % (ipa, want, sorted(seen[ipa]))
-    for f in FAMILY_SENTENCES:
-        assert phoneme_sound(f), "词族 %s 取不到示范读音" % f["g"]
-    # 每个音素都必须有可读文本（不允许空串）
+        assert want2 in seen[ipa], \
+            "%s 应由音素表给 %r，实际 %r" % (ipa, want2, sorted(seen[ipa]))
+
+    # 任何音素的读音都不允许是"多词句子"或含空格（那必然被整词朗读）
     for g in GROUPS:
         for e in g["entries"]:
-            assert phoneme_sound(e).strip(), "%s %s 无示范读音" % (e["g"], e["ipa"])
+            got = phoneme_sound(e).strip()
+            assert got, "%s %s 无读音" % (e["g"], e["ipa"])
+            assert " " not in got, \
+                "%s 的读音 %r 含空格，会被当整句朗读" % (e["ipa"], got)
+            assert got.lower() not in (e["words"][0][0].lower(),), \
+                "%s 退化成整词 %r" % (e["ipa"], got)
+    for f in FAMILY_SENTENCES:
+        assert phoneme_sound(f), "词族 %s 取不到读音" % f["g"]
+
     # 页面已为音素组构建卡片（tab_list 有内容，且卡片工厂带喇叭）
     assert ph.tabs.tab_list, "拼读页未构建任何 tab"
 
@@ -629,7 +638,7 @@ def _():
     # 用普通 Label 会显示方块（回归：提示条曾用 AppLabel）。
     from ui.theme import (FONT_NAME, IPA_FONT_NAME, MixedFontLabel,
                           _IPA_CHARS)
-    ph._flash("跟读：%s %s" % (entry["ipa"], want))
+    ph._flash("跟读：%s" % entry["ipa"])
     assert isinstance(ph.flash_lbl, MixedFontLabel), \
         "跟读提示条必须是 MixedFontLabel，否则音标会显示方块"
     segs = MixedFontLabel.split_segments(ph.flash_lbl_text())
