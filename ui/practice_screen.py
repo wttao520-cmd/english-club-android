@@ -21,7 +21,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from core import db
-from core.engine import RATING_LABEL, Session, split_words
+from core.engine import RATING_LABEL, Session, pick_distractors, split_words
 from core.srs import rating_to_quality, schedule
 from core.worker import run_async
 from .theme import (ACCENT, BLUE, CARD, FONT_NAME, GREEN, IPA_FONT_NAME,
@@ -112,6 +112,7 @@ class PracticeScreen(Screen):
         Screen.__init__(self, **kw)
         self.session = None
         self.course_ids = []
+        self._is_vocab = False
         self._mode = self._norm_mode(
             App.get_running_app().ctx.config.get("mode", "choice"))
         self._build()
@@ -307,7 +308,8 @@ class PracticeScreen(Screen):
         if not rows:
             rows = db.list_sentences(cid)[:n]
         self.lesson_ctx = None
-        mode = "choice" if key.startswith("vocab_") else None
+        self._is_vocab = key.startswith("vocab_")
+        mode = "choice" if self._is_vocab else None
         self.start([dict(r) for r in rows],
                    course["title"] if course else "练习", mode)
 
@@ -321,7 +323,8 @@ class PracticeScreen(Screen):
             return
         mode = None
         key = course["builtin_key"] if course else ""
-        if key.startswith("vocab_"):
+        self._is_vocab = key.startswith("vocab_")
+        if self._is_vocab:
             mode = "choice"
         total_lessons = lesson_count(db.count_sentences(course_id))
         self.lesson_ctx = (course_id, lesson_idx, total_lessons)
@@ -434,15 +437,17 @@ class PracticeScreen(Screen):
     def _render_choice(self, st, cur):
         """选词模式：候选池 = 当前句的所有单词。
 
-        打乱只做一次并缓存（按句子 id）；之后选中的词只是「隐藏」，
-        完整池顺序始终不变，因此其余词块的位置绝不跳变；
-        取回时对应词块重新显现，回到原位。
+        词汇课程额外混入 2 个干扰词（本句没有的词），否则候选里只有正确
+        答案、选择就没意义了。打乱只做一次并缓存（按句子 id）；之后选中的
+        词只是「隐藏」，完整池顺序始终不变，其余词块位置绝不跳变。
         """
         words = split_words(st.target)
         placed = st.placed
         sid = cur["id"] if cur is not None and "id" in cur.keys() else st.target
         if getattr(self, "_pool_cache_sid", None) != sid:
             full = [w for w, _sp in words]
+            if self._is_vocab:
+                full += self._vocab_distractors(full, 2)
             random.shuffle(full)
             self._pool_cache_sid = sid
             self._pool_full = full            # 打乱后的完整池（顺序固定）
@@ -450,6 +455,19 @@ class PracticeScreen(Screen):
         used = [w for w, _sp in words[:placed]]
         self.choice_board.show(words, placed, full, used=used,
                                wrong_text=getattr(st, "wrong_text", None))
+
+    def _vocab_distractors(self, exclude, count):
+        """从词汇课程里取 count 个不在 exclude 中的干扰词（已缓存词表）。"""
+        pool = getattr(self, "_distractor_words", None)
+        if pool is None:
+            pool = []
+            for c in db.list_courses():
+                if not (c["builtin_key"] or "").startswith("vocab_"):
+                    continue
+                for r in db.list_sentences(c["id"]):
+                    pool.extend(w for w, _s in split_words(r["en"]))
+            self._distractor_words = pool
+        return pick_distractors(pool, exclude, count)
 
     def _on_word_pick(self, text, tile=None):
         """句子选词：点击词块尝试填入下一个空位。"""

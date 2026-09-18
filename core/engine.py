@@ -39,6 +39,26 @@ def split_words(text):
     return [(w, sp) for w, sp in out if w]
 
 
+def pick_distractors(pool, exclude, count, rng=None):
+    """从 pool 中取 count 个不在 exclude 里的干扰词（去重、打乱）。
+
+    词汇课程选词时用：混入少量「本句没有的词」增加辨识难度，
+    否则候选里只有正确答案，选择就失去意义。
+    """
+    rnd = rng or random
+    low = set((w or "").lower() for w in exclude)
+    cand = []
+    seen = set()
+    for w in pool:
+        w = (w or "").strip()
+        if not w or w.lower() in low or w.lower() in seen:
+            continue
+        seen.add(w.lower())
+        cand.append(w)
+    rnd.shuffle(cand)
+    return cand[:max(0, count)]
+
+
 def shuffled_indices(n, rng=None):
     """生成 0..n-1 的乱序索引（n<=1 时原样返回），尽量不等于顺序。"""
     idx = list(range(n))
