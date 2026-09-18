@@ -2,6 +2,7 @@
 """课程库 / 今日复习 / 统计 / 导入。"""
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -22,23 +23,42 @@ from .widgets import BarChart, StatCard
 RATING_TEXT = {5: "Perfect", 4: "Great", 3: "Good", 0: "Again"}
 
 
-def _row_card(rows, on_open=None, open_text="开始闯关"):
-    """一行课程卡片（点击进入关卡选择）。"""
-    box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(4),
-                    size_hint_y=None, height=dp(74))
+def _row_card(rows, on_open=None, open_text="开始闯关", on_delete=None):
+    """一行课程卡片（点击进入关卡选择；on_delete 时右侧显示删除按钮）。
+
+    高度按内部内容精确计算（上 26 + 下 28 + 间距 4 + 上下内边距 24 = 82），
+    避免内容溢出卡片、与相邻元素视觉重叠。
+    """
+    top_h = dp(26)
+    bot_h = dp(28)
+    pad_v = dp(12)
+    box = BoxLayout(orientation="vertical", padding=[dp(12), pad_v],
+                    spacing=dp(4), size_hint_y=None,
+                    height=top_h + bot_h + dp(4) + pad_v * 2)
     from kivy.graphics import Color, Rectangle, RoundedRectangle
     with box.canvas.before:
         Color(*rgba(CARD))
         box._rect = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
-    box.bind(pos=lambda o, v: setattr(o._rect, "pos", v),
-             size=lambda o, v: setattr(o._rect, "size", v))
-    top = BoxLayout(size_hint_y=None, height=dp(26))
+        # 左侧彩色条（直接画在背景 canvas 里，不占用布局位）
+        Color(*rgba(ACCENT, 0.9))
+        box._bar = Rectangle(pos=(box.x + dp(2), box.y + dp(2)),
+                             size=(dp(3), box.height - dp(4)))
+    box.bind(pos=lambda o, v: (setattr(o._rect, "pos", v),
+                               setattr(o._bar, "pos", (v[0] + dp(2), v[1] + dp(2)))),
+             size=lambda o, v: (setattr(o._rect, "size", v),
+                                setattr(o._bar, "size", (dp(3), v[1] - dp(4)))))
+    top = BoxLayout(size_hint_y=None, height=top_h)
     top.add_widget(AppLabel(text="[b]%s[/b]" % rows[0], font_size=sp(15),
-                            halign="left", text_size=(dp(240), None)))
+                            halign="left", text_size=(dp(200), None)))
     top.add_widget(AppLabel(text=rows[1], font_size=sp(12), color=rgba(MUTED),
-                            size_hint_x=None, width=dp(60), halign="right"))
+                            size_hint_x=None, width=dp(52), halign="right"))
+    if on_delete:
+        del_btn = PrimaryButton(text="删除", size_hint_x=None, width=dp(52),
+                                font_size=sp(12), bg=rgba(RED))
+        del_btn.bind(on_release=lambda x: on_delete())
+        top.add_widget(del_btn)
     box.add_widget(top)
-    bottom = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
+    bottom = BoxLayout(size_hint_y=None, height=bot_h, spacing=dp(6))
     bottom.add_widget(AppLabel(text="%s 关 · 待复习 %s" % (rows[2], rows[3]),
                                font_size=sp(12), color=rgba(MUTED), halign="left"))
     if on_open:
@@ -47,18 +67,6 @@ def _row_card(rows, on_open=None, open_text="开始闯关"):
         b.bind(on_release=lambda x: on_open())
         bottom.add_widget(b)
     box.add_widget(bottom)
-
-    # 左侧彩色条（子 widget，层级在卡片之上）
-    bar = Widget(size_hint=(None, None))
-    with bar.canvas:
-        Color(*rgba(ACCENT, 0.9))
-        bar._r = Rectangle(pos=(box.x + dp(2), box.y + dp(2)),
-                           size=(dp(3), box.height - dp(4)))
-    box.bind(pos=lambda o, v: setattr(bar._r, "pos",
-                                      (v[0] + dp(2), v[1] + dp(2))),
-             size=lambda o, v: setattr(bar._r, "size",
-                                       (dp(3), v[1] - dp(4))))
-    box.add_widget(bar)
     return box
 
 
@@ -140,14 +148,45 @@ class LessonPopup(Popup):
         self.app.start_lesson(self.course["id"], idx)
 
 
+def _collapse_header(title, count, expanded, on_toggle, color=ACCENT,
+                     indent=0, size=15):
+    """可点击的折叠标题行：显示 ▸/▾ + 名称 + 数量。"""
+    box = BoxLayout(size_hint_y=None, height=dp(42), padding=[dp(10 + indent), dp(4)])
+    from kivy.graphics import Color, RoundedRectangle
+    with box.canvas.before:
+        Color(*rgba(CARD if indent == 0 else "#1b2130"))
+        box._rect = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(10)])
+    box.bind(pos=lambda o, v: setattr(o._rect, "pos", v),
+             size=lambda o, v: setattr(o._rect, "size", v))
+    # 折叠指示用 ASCII 的 -/+ ，避免主字体缺 ▸▾ 等符号导致显示方块
+    mark = "[-]" if expanded else "[+]"
+    box.add_widget(AppLabel(
+        text="[b]%s %s[/b]" % (mark, title), font_size=sp(size),
+        color=rgba(color), halign="left"))
+    box.add_widget(AppLabel(
+        text="%d 门" % count, font_size=sp(12), color=rgba(MUTED),
+        size_hint_x=None, width=dp(56), halign="right"))
+    box.bind(on_touch_down=lambda w, t: (
+        on_toggle() if w.collide_point(*t.pos) else None))
+    return box
+
+
 class CoursesScreen(Screen):
+    """课程库：大类 → 小类 → 课程，可折叠浏览。"""
+
     def __init__(self, **kw):
         Screen.__init__(self, **kw)
+        self._expanded = {"cat": set(), "sub": set()}
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
-        head = BoxLayout(size_hint_y=None, height=dp(40))
+        head = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
         head.add_widget(TitleLabel(text="课程库"))
         head.add_widget(Widget())
-        b = PrimaryButton(text="刷新", size_hint_x=None, width=dp(80))
+        ai_b = PrimaryButton(text="AI 生成课程", size_hint_x=None, width=dp(104),
+                             font_size=sp(12), bg=rgba(BLUE))
+        ai_b.bind(on_release=lambda x: self._ai_generate())
+        head.add_widget(ai_b)
+        b = PrimaryButton(text="刷新", size_hint_x=None, width=dp(66),
+                          font_size=sp(12))
         b.bind(on_release=lambda x: self.refresh())
         head.add_widget(b)
         root.add_widget(head)
@@ -161,19 +200,212 @@ class CoursesScreen(Screen):
 
     def refresh(self):
         self.grid.clear_widgets()
-        app = App.get_running_app()
-        for c in db.list_courses():
-            n = db.count_sentences(c["id"])
-            due = db.due_count(c["id"])
-            card = _row_card([c["title"], c["level"], n, due],
-                             on_open=lambda cc=dict(c): self._open(cc))
-            card.bind(on_touch_down=lambda w, t, cc=dict(c):
-                      self._open(cc) if w.collide_point(*t.pos) and t.is_double_tap
-                      else None)
-            self.grid.add_widget(card)
+        groups = db.grouped_courses()
+        for cat, subs in groups.items():
+            n_courses = sum(len(v) for v in subs.values())
+            cat_open = cat in self._expanded["cat"]
+            self.grid.add_widget(_collapse_header(
+                cat, n_courses, cat_open,
+                lambda c=cat: self._toggle("cat", c), color=ACCENT, size=16))
+            if not cat_open:
+                continue
+            # 只有一个小类时省略小类层，直接把课程铺开（减少层级）
+            single_sub = len(subs) == 1
+            for sub, courses in subs.items():
+                if not single_sub:
+                    sub_key = "%s/%s" % (cat, sub)
+                    sub_open = sub_key in self._expanded["sub"]
+                    self.grid.add_widget(_collapse_header(
+                        sub, len(courses), sub_open,
+                        lambda k=sub_key: self._toggle("sub", k),
+                        color=YELLOW, indent=12, size=14))
+                    if not sub_open:
+                        continue
+                for c in courses:
+                    self.grid.add_widget(self._course_card(c))
+
+    def _course_card(self, c):
+        n = db.count_sentences(c["id"])
+        due = db.due_count(c["id"])
+        card = _row_card([c["title"], c["level"], n, due],
+                         on_open=lambda cc=dict(c): self._open(cc),
+                         on_delete=lambda cc=dict(c): self._confirm_delete(cc))
+        card.bind(on_touch_down=lambda w, t, cc=dict(c):
+                  self._open(cc) if w.collide_point(*t.pos) and t.is_double_tap
+                  else None)
+        return card
+
+    def _confirm_delete(self, course):
+        """确认后删除课程（连同其句子、卡片、复习记录）。"""
+        content = BoxLayout(orientation="vertical", spacing=dp(10),
+                            padding=dp(12))
+        content.add_widget(AppLabel(
+            text="确定删除课程「[b]%s[/b]」吗？\n该课程的练习与复习记录也会一并删除。"
+                 % course["title"], font_size=sp(14), halign="left"))
+        btns = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        cancel = PrimaryButton(text="取消", bg=rgba(CARD))
+        ok = PrimaryButton(text="删除", bg=rgba(RED))
+        btns.add_widget(cancel)
+        btns.add_widget(ok)
+        content.add_widget(btns)
+        pop = Popup(title="", separator_height=0, content=content,
+                    size_hint=(0.86, 0.36), background="",
+                    background_color=rgba("#141922"))
+        cancel.bind(on_release=lambda x: pop.dismiss())
+
+        def _do_delete(*a):
+            db.delete_course(course["id"])
+            pop.dismiss()
+            App.get_running_app().refresh_all()
+            self.refresh()
+        ok.bind(on_release=_do_delete)
+        pop.open()
+
+    def _toggle(self, kind, key):
+        s = self._expanded[kind]
+        if key in s:
+            s.discard(key)
+        else:
+            s.add(key)
+        self.refresh()
 
     def _open(self, course):
         LessonPopup(course, App.get_running_app()).open()
+
+    # ------------------------------------------------------- AI 生成课程
+    def _ai_generate(self):
+        ctx = App.get_running_app().ctx
+        if not ctx.ai.enabled:
+            self._toast("请先在「设置」中配置 AI Key（推荐免费的 Agnes）")
+            return
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
+        content.add_widget(AppLabel(
+            text="描述你想学的主题，AI 会自动生成一门课程。",
+            font_size=sp(12), color=rgba(MUTED), size_hint_y=None, height=dp(22)))
+        topic = AppTextInput(hint_text="主题，如：机场值机 / 小学动物词汇",
+                             multiline=False, size_hint_y=None, height=dp(40))
+        content.add_widget(topic)
+        # 课程类型：句子 / 词汇
+        trow = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        trow.add_widget(AppLabel(text="类型", font_size=sp(13),
+                                 size_hint_x=None, width=dp(40)))
+        kind = AppSpinner(text="句子课程", values=["句子课程", "词汇课程"],
+                          size_hint_x=None, width=dp(104))
+        trow.add_widget(kind)
+        trow.add_widget(AppLabel(text="难度", font_size=sp(13),
+                                 size_hint_x=None, width=dp(40)))
+        level = AppSpinner(text="初级", values=["初级", "中级", "高级"],
+                           size_hint_x=None, width=dp(84))
+        trow.add_widget(level)
+        trow.add_widget(Widget())
+        content.add_widget(trow)
+        row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        title_in = AppTextInput(hint_text="课程名称（可留空）", multiline=False)
+        row.add_widget(title_in)
+        content.add_widget(row)
+        crow = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        self._cnt_lbl = AppLabel(text="数量", font_size=sp(13),
+                                 size_hint_x=None, width=dp(40))
+        crow.add_widget(self._cnt_lbl)
+        cnt = AppTextInput(text="20", multiline=False, input_filter="int",
+                           size_hint_x=None, width=dp(80))
+        crow.add_widget(cnt)
+        crow.add_widget(AppLabel(text="5 ~ 5000", font_size=sp(12),
+                                 color=rgba(MUTED)))
+        crow.add_widget(Widget())
+        content.add_widget(crow)
+
+        self._ai_status = AppLabel(text="", font_size=sp(12),
+                                   color=rgba(MUTED), size_hint_y=None,
+                                   height=dp(22))
+        content.add_widget(self._ai_status)
+        btns = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        cancel = PrimaryButton(text="取消", bg=rgba(CARD))
+        gen = PrimaryButton(text="生成", bg=rgba(BLUE))
+        btns.add_widget(cancel)
+        btns.add_widget(gen)
+        content.add_widget(btns)
+        pop = Popup(title="", separator_height=0, content=content,
+                    size_hint=(0.94, 0.56), background="",
+                    background_color=rgba("#141922"))
+        cancel.bind(on_release=lambda x: pop.dismiss())
+
+        def _sync_cnt(*a):
+            self._cnt_lbl.text = "词汇数" if kind.text == "词汇课程" else "句子数"
+        kind.bind(text=_sync_cnt)
+
+        def _run(*a):
+            t = topic.text.strip()
+            if not t:
+                self._set_ai_status("[color=%s]请填写主题[/color]" % RED)
+                return
+            try:
+                n = int(cnt.text or "20")
+            except ValueError:
+                n = 20
+            n = max(5, min(5000, n))
+            is_vocab = kind.text == "词汇课程"
+            unit = "词汇" if is_vocab else "句子"
+            self._set_ai_status(
+                "[color=%s]AI 生成中… 已生成 0/%d 个%s[/color]" % (MUTED, n, unit))
+            gen.disabled = True
+
+            def _progress(done, total):
+                # 工作线程回调：切到主线程更新进度
+                Clock.schedule_once(
+                    lambda dt: self._set_ai_status(
+                        "[color=%s]AI 生成中… 已生成 %d/%d 个%s[/color]"
+                        % (MUTED, done, total, unit)), 0)
+
+            fn = ctx.ai.generate_vocab if is_vocab else ctx.ai.generate_course
+            run_async(fn,
+                      lambda items: self._on_ai_done(
+                          items, t, title_in.text.strip(),
+                          level.text, is_vocab, pop),
+                      lambda msg: self._on_ai_fail(msg, gen),
+                      t, level.text, n,
+                      progress=_progress)
+        gen.bind(on_release=_run)
+        pop.open()
+
+    def _set_ai_status(self, text):
+        try:
+            self._ai_status.text = text
+            self._ai_status.markup = True
+        except Exception:
+            pass
+
+    def _on_ai_done(self, items, topic, title, level, is_vocab, pop):
+        if not items:
+            self._set_ai_status("[color=%s]AI 未生成内容，请重试[/color]" % RED)
+            return
+        title = title or ("%s（AI）" % topic)
+        kind_name = "词汇" if is_vocab else "句子"
+        cid = db.add_course(title, "AI 生成%s：%s" % (kind_name, topic),
+                            level, "custom")
+        if is_vocab:
+            # 词汇：(word, zh, note)
+            db.add_sentences(cid, [(w, zh, note) for w, zh, note in items])
+        else:
+            db.add_sentences(cid, [(en, zh, "") for en, zh in items])
+        pop.dismiss()
+        App.get_running_app().refresh_all()
+        self.refresh()
+        self._toast("已生成%s课程「%s」，共 %d 个"
+                    % (kind_name, title, len(items)))
+
+    def _on_ai_fail(self, msg, gen):
+        self._set_ai_status("[color=%s]%s[/color]" % (RED, msg))
+        gen.disabled = False
+
+    def _toast(self, text):
+        content = BoxLayout(padding=dp(14))
+        content.add_widget(AppLabel(text=text, font_size=sp(14), halign="center"))
+        pop = Popup(title="", separator_height=0, content=content,
+                    size_hint=(0.8, 0.24), background="",
+                    background_color=rgba("#141922"))
+        pop.open()
+        Clock.schedule_once(lambda dt: pop.dismiss(), 1.8)
 
 
 class ReviewScreen(Screen):

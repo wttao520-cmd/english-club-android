@@ -6,11 +6,12 @@ import os
 APP_NAME = "english_club"
 
 DEFAULT_CONFIG = {
-    # ---- AI（OpenAI 兼容接口，支持 DeepSeek / OpenAI / 通义 / 月之暗面 等）----
+    # ---- AI（OpenAI 兼容接口）----
+    # 默认使用 Agnes（完全免费，官网注册即可拿 Key：https://agnes-ai.com）
     "ai_enabled": False,
-    "ai_base_url": "https://api.deepseek.com/v1",
+    "ai_base_url": "https://apihub.agnes-ai.com/v1",
     "ai_api_key": "",
-    "ai_model": "deepseek-chat",
+    "ai_model": "agnes-2.5-flash",
     # ---- 练习 ----
     "mode": "choice",          # 选词模式（默认，手机免键盘点选拼句）
                                # word | sentence | dictation | phonics | choice

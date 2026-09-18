@@ -736,9 +736,13 @@ class PetWidget(Widget):
 
 
 class PickerPopup(Popup):
-    """全屏式选项弹窗：替代 Spinner，竖屏下永远不会显示不全。"""
+    """全屏式选项弹窗：替代 Spinner，竖屏下永远不会显示不全。
 
-    def __init__(self, title, values, on_pick, current=None, **kw):
+    groups 不为空时按「分组标题（可折叠）+ 组内选项」渲染，便于课程多时浏览。
+    groups 形如：[("小类名", [选项文本, ...]), ...]。
+    """
+
+    def __init__(self, title, values, on_pick, current=None, groups=None, **kw):
         Popup.__init__(self, title="", separator_height=0, **kw)
         self.size_hint = (0.9, 0.82)
         self.background = ""
@@ -746,6 +750,9 @@ class PickerPopup(Popup):
         self.values = list(values)
         self.on_pick = on_pick
         self.current = current
+        self._groups = list(groups) if groups else None
+        self._open_groups = set()
+        self._auto_expanded = False   # 只在首次打开时自动展开当前项所在组
 
         root = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
         head = BoxLayout(size_hint_y=None, height=dp(36))
@@ -757,22 +764,74 @@ class PickerPopup(Popup):
         head.add_widget(close)
         root.add_widget(head)
 
-        sv = ScrollView(scroll_type=["bars", "content"], bar_width=dp(6))
-        grid = GridLayout(cols=1, spacing=dp(6), size_hint_y=None,
-                          padding=dp(2))
-        grid.bind(minimum_height=grid.setter("height"))
-        for v in self.values:
-            sel = (v == self.current)
-            b = PrimaryButton(
-                text=("[b]%s[/b]" % v) + ("　[color=%s]√[/color]" % GREEN
-                                          if sel else ""),
-                size_hint_y=None, height=dp(52), font_size=sp(15),
-                bg=rgba(ACCENT if sel else PANEL2), halign="left")
-            b.bind(on_release=lambda x, val=v: self._pick(val))
-            grid.add_widget(b)
-        sv.add_widget(grid)
-        root.add_widget(sv)
+        self._sv = ScrollView(scroll_type=["bars", "content"], bar_width=dp(6))
+        self._grid = GridLayout(cols=1, spacing=dp(6), size_hint_y=None,
+                                padding=dp(2))
+        self._grid.bind(minimum_height=self._grid.setter("height"))
+        self._sv.add_widget(self._grid)
+        root.add_widget(self._sv)
         self.content = root
+        self._fill()
+
+    def _fill(self):
+        self._grid.clear_widgets()
+        if not self._groups:
+            for v in self.values:
+                self._grid.add_widget(self._option(v))
+            return
+        # 分组模式：首次打开时展开含当前选项的组，之后完全尊重用户折叠状态
+        # （不能用 `if not self._open_groups` 判断，否则用户折叠到空集合后会被强制再展开）
+        if not self._auto_expanded:
+            self._auto_expanded = True
+            for name, items in self._groups:
+                if self.current in items:
+                    self._open_groups.add(name)
+        for name, items in self._groups:
+            opened = name in self._open_groups
+            self._grid.add_widget(self._group_header(name, len(items), opened))
+            if opened:
+                for v in items:
+                    self._grid.add_widget(self._option(v, indent=dp(10)))
+
+    def _group_header(self, name, count, opened):
+        from kivy.graphics import Color, RoundedRectangle
+        box = BoxLayout(size_hint_y=None, height=dp(44),
+                        padding=[dp(10), dp(4)])
+        with box.canvas.before:
+            Color(*rgba(CARD))
+            box._rect = RoundedRectangle(pos=box.pos, size=box.size,
+                                         radius=[dp(10)])
+        box.bind(pos=lambda o, v: setattr(o._rect, "pos", v),
+                 size=lambda o, v: setattr(o._rect, "size", v))
+        mark = "[-]" if opened else "[+]"
+        box.add_widget(AppLabel(text="[b]%s %s[/b]" % (mark, name),
+                                font_size=sp(15), color=rgba(YELLOW),
+                                halign="left"))
+        box.add_widget(AppLabel(text="%d" % count, font_size=sp(12),
+                                color=rgba(MUTED), size_hint_x=None,
+                                width=dp(40), halign="right"))
+        box.bind(on_touch_down=lambda w, t, n=name: (
+            self._toggle_group(n) if w.collide_point(*t.pos) else None))
+        return box
+
+    def _toggle_group(self, name):
+        if name in self._open_groups:
+            self._open_groups.discard(name)
+        else:
+            self._open_groups.add(name)
+        self._fill()
+
+    def _option(self, v, indent=0):
+        sel = (v == self.current)
+        b = PrimaryButton(
+            text=("[b]%s[/b]" % v) + ("　[color=%s]√[/color]" % GREEN
+                                      if sel else ""),
+            size_hint_y=None, height=dp(50), font_size=sp(15),
+            bg=rgba(ACCENT if sel else PANEL2), halign="left")
+        if indent:
+            b.padding = [indent, dp(4)]
+        b.bind(on_release=lambda x, val=v: self._pick(val))
+        return b
 
     def _pick(self, val):
         self.dismiss()

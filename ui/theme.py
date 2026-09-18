@@ -2,6 +2,7 @@
 """主题：颜色、中文字体解析、通用控件。"""
 
 import os
+import re
 
 from kivy.core.text import LabelBase
 from kivy.metrics import dp, sp
@@ -186,6 +187,70 @@ class AppLabel(Label):
 
     def _wrap(self, *a):
         self.text_size = (self.width, None)
+
+
+_IPA_SEG = re.compile(r"(/[^/\n]{0,24}/)")
+
+
+class MixedFontLabel(BoxLayout):
+    """把文本按字体分段渲染：形如 /…/ 的音标段用 IPA 字体，其余用主字体。
+
+    主字体子集不含部分国际音标字形（ɪ ə ʊ ɔ ʃ ː ˈ 等），混排会显示方块；
+    Kivy 的 Label 不支持一行内多种字体，故把文本切成若干段，
+    音标段单独用 IPAFont 的 Label，其余用主字体，按宽度自动换行排布。
+    """
+
+    def __init__(self, text="", font_size=None, color=MUTED, **kw):
+        from kivy.uix.label import Label as KLabel
+        kw.setdefault("orientation", "horizontal")
+        kw.setdefault("spacing", 0)
+        kw.setdefault("size_hint_y", None)
+        BoxLayout.__init__(self, **kw)
+        self._fs = font_size or sp(12)
+        self._color = color
+        self._lbls = []
+        self._set_segments(text or "")
+        self.bind(width=self._reflow)
+        self.bind(minimum_height=self.setter("height"))
+
+    def _set_segments(self, text):
+        from kivy.uix.label import Label as KLabel
+        self.clear_widgets()
+        self._lbls = []
+        parts = _IPA_SEG.split(text)
+        for p in parts:
+            if not p:
+                continue
+            is_ipa = bool(_IPA_SEG.fullmatch(p))
+            lbl = KLabel(text=p,
+                         font_name=(IPA_FONT_NAME if is_ipa else FONT_NAME),
+                         font_size=self._fs, color=rgba(self._color),
+                         size_hint=(None, None), halign="left", valign="top")
+            lbl.texture_update()
+            lbl.width = lbl.texture_size[0]
+            lbl.height = lbl.texture_size[1]
+            self._lbls.append(lbl)
+            self.add_widget(lbl)
+        self._reflow()
+
+    def set_text(self, text):
+        self._set_segments(text)
+
+    def _reflow(self, *a):
+        avail = max(dp(40), self.width)
+        x = y = 0.0
+        row_h = 0.0
+        for lbl in reversed(self.children):
+            w = max(dp(1), lbl.width)
+            h = lbl.height
+            if x > 0 and x + w > avail + 0.5:
+                x = 0.0
+                y += row_h
+                row_h = 0.0
+            lbl.pos = (self.x + x, self.y + self.height - y - h)
+            x += w
+            row_h = max(row_h, h)
+        self.height = y + row_h
 
 
 class MutedLabel(AppLabel):

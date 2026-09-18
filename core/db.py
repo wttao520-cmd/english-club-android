@@ -115,6 +115,98 @@ def list_courses():
     return rows
 
 
+# 课程分类规则：按 builtin_key 前缀 → (大类, 小类)。按顺序匹配。
+_CATEGORY_RULES = [
+    # ---------------- 词汇课程 ----------------
+    ("vocab_xqh1a", "词汇课程", "新启航一年级 · 上册"),
+    ("vocab_xqh1b", "词汇课程", "新启航一年级 · 下册"),
+    ("vocab_",      "词汇课程", "小学基础词汇"),   # vocab_num_time / vocab_family ...
+    # ---------------- 自然拼读（key 前缀 ph_）----------------
+    ("ph_alphabet",    "自然拼读", "字母音 A~Z"),
+    ("ph_short_vowel", "自然拼读", "短元音"),
+    ("ph_magic_e",     "自然拼读", "Magic e 长元音"),
+    ("ph_vowel_team",  "自然拼读", "元音字母组合"),
+    ("ph_r_vowel",     "自然拼读", "R 控元音"),
+    ("ph_diphthong",   "自然拼读", "双元音"),
+    ("ph_digraph",     "自然拼读", "辅音二合字母"),
+    ("ph_blend",       "自然拼读", "辅音连缀"),
+    ("ph_",            "自然拼读", "词族短句"),
+    # ---------------- 句子课程（按难度）----------------
+    ("xqh1a_s",     "句子课程", "新启航一年级 · 上册"),
+    ("xqh1b_s",     "句子课程", "新启航一年级 · 下册"),
+    ("greeting",    "句子课程", "入门 · 问候语"),
+    ("primary",     "句子课程", "小学 · 常用句"),
+    ("junior",      "句子课程", "初中 · 常用句"),
+    ("senior",      "句子课程", "高中 · 常用句"),
+    ("cet46",       "句子课程", "四六级"),
+    ("ielts",       "句子课程", "雅思"),
+    ("workplace",   "句子课程", "职场英语"),
+    ("travel",      "句子课程", "旅行英语"),
+    ("series",      "句子课程", "系列故事"),
+]
+
+
+def course_category(course):
+    """返回课程的 (大类, 小类) 分类名，用于课程库分组浏览。"""
+    key = (course["builtin_key"] if "builtin_key" in course.keys() else "") or ""
+    for prefix, cat, sub in _CATEGORY_RULES:
+        if key.startswith(prefix):
+            return cat, sub
+    # 兜底：按来源/题型判断
+    src = (course["source"] if "source" in course.keys() else "") or ""
+    if src == "custom":
+        return "自定义导入", "我的课程"
+    if key.startswith("vocab_"):
+        return "词汇课程", "其它词汇"
+    return "句子课程", "其它课程"
+
+
+# 各大类下小类的展示顺序（越靠前越先显示）。未列出的排在其后。
+_SUB_ORDER = {
+    "词汇课程": ["新启航一年级 · 上册", "新启航一年级 · 下册", "小学基础词汇",
+                 "其它词汇"],
+    "句子课程": ["新启航一年级 · 上册", "新启航一年级 · 下册", "入门 · 问候语",
+                 "小学 · 常用句", "初中 · 常用句", "高中 · 常用句", "四六级",
+                 "雅思", "职场英语", "旅行英语", "系列故事", "其它课程"],
+    "自然拼读": ["字母音 A~Z", "短元音", "Magic e 长元音", "元音字母组合",
+                 "R 控元音", "双元音", "辅音二合字母", "辅音连缀", "词族短句"],
+    "自定义导入": ["我的课程"],
+}
+# 大类的展示顺序
+_CAT_ORDER = ["词汇课程", "句子课程", "自然拼读", "自定义导入"]
+
+
+def grouped_courses():
+    """把课程按「大类 → 小类 → 课程列表」整理好返回。
+
+    返回 OrderedDict: {大类: OrderedDict{小类: [course, ...]}}。
+    小类按 _SUB_ORDER 指定的顺序展示（新启航排在各分类最前），
+    大类按 _CAT_ORDER 排序；未列出的按字母序补在后面。
+    """
+    from collections import OrderedDict
+    raw = {}
+    for c in list_courses():
+        cat, sub = course_category(c)
+        raw.setdefault(cat, OrderedDict()).setdefault(sub, []).append(c)
+
+    def cat_key(name):
+        return (_CAT_ORDER.index(name) if name in _CAT_ORDER else len(_CAT_ORDER),
+                name)
+
+    def sub_key(cat, name):
+        order = _SUB_ORDER.get(cat, [])
+        return (order.index(name) if name in order else len(order), name)
+
+    groups = OrderedDict()
+    for cat in sorted(raw.keys(), key=cat_key):
+        subs = raw[cat]
+        ordered = OrderedDict()
+        for name in sorted(subs.keys(), key=lambda s: sub_key(cat, s)):
+            ordered[name] = subs[name]
+        groups[cat] = ordered
+    return groups
+
+
 def get_course(course_id):
     conn = connect()
     row = conn.execute("SELECT * FROM courses WHERE id=?", (course_id,)).fetchone()
@@ -420,7 +512,10 @@ def add_points(n):
 
 def pet_get():
     conn = connect()
+    # 必须 commit：否则默认事务模式下 close() 会回滚这条 INSERT，
+    # 导致 pet 表始终为空、pet_save 的 UPDATE 影响 0 行（解锁/切换/喂养都不生效）
     conn.execute("INSERT OR IGNORE INTO pet (id) VALUES (0)")
+    conn.commit()
     row = conn.execute("SELECT * FROM pet WHERE id=0").fetchone()
     conn.close()
     return dict(row)
@@ -429,6 +524,8 @@ def pet_get():
 def pet_save(species, name, exp, unlocked):
     import json
     conn = connect()
+    # 兜底：确保基础行存在（老库/异常情况下 id=0 行可能缺失）
+    conn.execute("INSERT OR IGNORE INTO pet (id) VALUES (0)")
     conn.execute(
         "UPDATE pet SET species=?, name=?, exp=?, unlocked=? WHERE id=0",
         (species, name, int(exp), json.dumps(list(unlocked))))

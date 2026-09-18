@@ -106,8 +106,7 @@ class ChatScreen(Screen):
 
         top = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
         self.scene_btn = PrimaryButton(
-            text="%s %s" % (self.scene["icon"], self.scene["title"]),
-            font_size=sp(14))
+            text=self._scene_name(self.scene), font_size=sp(14))
         self.scene_btn.bind(on_release=lambda b: self._pick_scene())
         top.add_widget(self.scene_btn)
         top.add_widget(self._points_label())
@@ -181,17 +180,20 @@ class ChatScreen(Screen):
 
     # ------------------------------------------------------------ 场景
     def _pick_scene(self):
-        names = ["%s %s" % (s["icon"], s["title"]) for s in chat_scenes.SCENES]
+        names = [self._scene_name(s) for s in chat_scenes.SCENES]
         PickerPopup("选择对话场景", names, self._scene_chosen,
-                    current="%s %s" % (self.scene["icon"], self.scene["title"])
-                    ).open()
+                    current=self._scene_name(self.scene)).open()
+
+    @staticmethod
+    def _scene_name(s):
+        return ("%s %s" % (s["icon"], s["title"])).strip()
 
     def _scene_chosen(self, name):
         for s in chat_scenes.SCENES:
-            if "%s %s" % (s["icon"], s["title"]) == name:
+            if self._scene_name(s) == name:
                 self.scene = s
                 break
-        self.scene_btn.text = "%s %s" % (self.scene["icon"], self.scene["title"])
+        self.scene_btn.text = self._scene_name(self.scene)
         self.info_lbl.text = self.scene["desc"]
         self._reset()
 
@@ -209,7 +211,8 @@ class ChatScreen(Screen):
         if not text:
             return
         if not self.ctx.ai.config.get("ai_api_key"):
-            self._add_bubble("请先在「设置」中启用 AI 并填写 API Key。",
+            self._add_bubble("请先在「设置」中启用 AI 并填写 API Key"
+                             "（推荐免费的 Agnes，官网注册即得）。",
                              mine=False, small=True)
             return
         self.inp.text = ""
@@ -232,10 +235,11 @@ class ChatScreen(Screen):
         self._remove_typing()
         en, fix, tip = _split_reply(raw)
         self._add_bubble(en, mine=False)
+        # 提示前缀用主字体可显示的字符（✎/💡 等 emoji 会显示成方块）
         if fix:
-            self._add_bubble("✎ %s" % fix, mine=False, small=True)
+            self._add_bubble("[纠错] %s" % fix, mine=False, small=True)
         if tip:
-            self._add_bubble("💡 %s" % tip, mine=False, small=True)
+            self._add_bubble("[提示] %s" % tip, mine=False, small=True)
         self.history.append({"role": "assistant", "content": en})
         self.pts_lbl.text = "[color=%s]%d 分[/color]" % (YELLOW, db.get_points())
 
@@ -258,4 +262,4 @@ class ChatScreen(Screen):
 
     def _on_translate(self, text):
         self._remove_typing()
-        self._add_bubble("🇨🇳 %s" % (text or "（无）"), mine=False, small=True)
+        self._add_bubble("[译文] %s" % (text or "（无）"), mine=False, small=True)

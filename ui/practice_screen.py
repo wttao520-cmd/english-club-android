@@ -27,7 +27,7 @@ from core.worker import run_async
 from .theme import (ACCENT, BLUE, CARD, FONT_NAME, GREEN, IPA_FONT_NAME,
                     MUTED, PANEL2, RED, TEXT, YELLOW, AppLabel, AppSpinner,
                     AppSpinnerOption, AppTextInput, PrimaryButton, TitleLabel,
-                    rgba, sdp, ssp)
+                    rgba, sdp, ssp, MixedFontLabel)
 from .widgets import ComboBadge, PickerPopup, TypingBoard, WordChoiceBoard
 from .pet_screen import PetEntry
 
@@ -175,11 +175,11 @@ class PracticeScreen(Screen):
                              valign="middle")
         root.add_widget(self.ipa_lbl)
 
-        # 例句/讲解：高度随内容自适应（多行不再溢出遮挡打字板），上限 4 行
-        self.note_lbl = AppLabel(text="", font_size=ssp(13), color=rgba(MUTED),
-                                 halign="center", size_hint_y=None, height=dp(18))
-        self.note_lbl.bind(texture_size=self._sync_note_height)
-        self.note_lbl.bind(width=self._sync_note_height)
+        # 例句/讲解：含音标段用 IPA 字体（MixedFontLabel），避免方块；
+        # 高度由控件自身按内容计算，无需外部干预
+        self.note_lbl = MixedFontLabel(text="", font_size=ssp(13),
+                                       color=MUTED, size_hint_y=None,
+                                       height=dp(18))
         root.add_widget(self.note_lbl)
 
         # ---------------- 中部答题区（弹性占满剩余空间）----------------
@@ -268,11 +268,24 @@ class PracticeScreen(Screen):
         return self.course_ids[0] if self.course_ids else None
 
     def _pick_course(self):
-        titles = [c["title"] for c in getattr(self, "courses", [])]
+        courses = getattr(self, "courses", [])
+        titles = [c["title"] for c in courses]
         if not titles:
             return
+        # 按「大类 · 小类」分组，课程多时便于浏览
+        by_title = {c["title"]: c for c in courses}
+        groups = []
+        for cat, subs in db.grouped_courses().items():
+            for sub, items in subs.items():
+                names = [c["title"] for c in items if c["title"] in by_title]
+                if names:
+                    label = cat if sub in ("小学基础词汇", "其它词汇",
+                                           "其它课程", "我的课程") else \
+                        "%s · %s" % (cat, sub)
+                    groups.append((label, names))
         PickerPopup("选择课程", titles, self._course_chosen,
-                    current=getattr(self, "_current_title", None)).open()
+                    current=getattr(self, "_current_title", None),
+                    groups=groups).open()
 
     def _course_chosen(self, title):
         self._current_title = title
@@ -344,6 +357,10 @@ class PracticeScreen(Screen):
         if not sentences:
             self.status = "这个课程还没有可练习的句子"
             return
+        # 同步「选择课程」按钮为该课程名（从课程库/关卡进入时也要刷新）
+        if title:
+            self._current_title = title
+            self.course_btn.text = title
         if mode:
             self._mode = mode
             self.mode_btn.text = self._mode_name(mode)
@@ -397,23 +414,6 @@ class PracticeScreen(Screen):
             h = max(sdp(40), lbl.texture_size[1] + sdp(8))
         except Exception:
             h = sdp(48)
-        if abs(h - lbl.height) > 1:
-            lbl.height = h
-
-    def _sync_note_height(self, *a):
-        """例句/讲解高度按内容自适应（多行不再溢出遮挡打字板）。
-
-        空间足够时完整显示；最多占答题区的一半高度，保证打字区可用。
-        """
-        lbl = self.note_lbl
-        try:
-            lbl.text_size = (max(sdp(40), lbl.width), None)
-            want = lbl.texture_size[1] + sdp(6)
-            room = getattr(self, "answer_area", None)
-            cap = (room.height * 0.5) if room is not None else sdp(300)
-            h = max(dp(0), min(want, max(sdp(60), cap)))
-        except Exception:
-            h = dp(18)
         if abs(h - lbl.height) > 1:
             lbl.height = h
 
@@ -528,7 +528,7 @@ class PracticeScreen(Screen):
         self.ipa_lbl.height = dp(26) if ipa_text else dp(0)
         if self._mode == "phonics" and note.count("｜") == 2:
             note = "%s｜%s" % (note.split("｜")[1], note.split("｜")[2])
-        self.note_lbl.text = note or ""
+        self.note_lbl.set_text(note or "")
         if self._mode == "choice":
             self._render_choice(st, cur)
         else:

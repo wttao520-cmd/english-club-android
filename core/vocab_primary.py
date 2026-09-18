@@ -12,8 +12,9 @@ from .vocab_p1 import GROUPS as _G1
 from .vocab_p2 import GROUPS as _G2
 from .vocab_p3 import GROUPS as _G3
 from .vocab_p4 import GROUPS as _G4
+from .vocab_xqh import GROUPS as _GX   # 外研《新启航英语》一年级专册
 
-_ALL_GROUPS = _G1 + _G2 + _G3 + _G4
+_ALL_GROUPS = _G1 + _G2 + _G3 + _G4 + _GX
 
 
 def _note(ipa, ex, ex_zh, tip):

@@ -22,7 +22,7 @@ SCENES = [
     {
         "key": "free",
         "title": "自由聊天",
-        "icon": "💬",
+        "icon": "",
         "role": "a friendly English teacher",
         "desc": "随便聊，AI 当你的英语笔友。",
         "system": "You are a friendly English teacher chatting with a Chinese "
@@ -32,7 +32,7 @@ SCENES = [
     {
         "key": "greeting",
         "title": "日常问候",
-        "icon": "👋",
+        "icon": "",
         "role": "a new classmate from the UK",
         "desc": "和新同学互相认识、聊兴趣爱好。",
         "system": "You are Emma, a new classmate from the UK. The student just "
@@ -43,7 +43,7 @@ SCENES = [
     {
         "key": "restaurant",
         "title": "餐厅点餐",
-        "icon": "🍔",
+        "icon": "",
         "role": "a waiter at a restaurant",
         "desc": "练习点餐、询问菜品、结账。",
         "system": "You are a waiter at an English restaurant. Take the "
@@ -55,7 +55,7 @@ SCENES = [
     {
         "key": "directions",
         "title": "问路指路",
-        "icon": "🗺",
+        "icon": "",
         "role": "a kind local person",
         "desc": "练习问路、描述位置、交通方式。",
         "system": "You are a kind local person on a city street. The student "
@@ -68,7 +68,7 @@ SCENES = [
     {
         "key": "shopping",
         "title": "商店购物",
-        "icon": "🛍",
+        "icon": "",
         "role": "a shop assistant",
         "desc": "练习问价格、试穿、讨价还价。",
         "system": "You are a friendly shop assistant in a clothes store. Help "
@@ -80,7 +80,7 @@ SCENES = [
     {
         "key": "interview",
         "title": "工作面试",
-        "icon": "💼",
+        "icon": "",
         "role": "an HR interviewer",
         "desc": "练习自我介绍、优缺点、职业规划（进阶）。",
         "system": "You are an HR interviewer at a tech company. Interview the "

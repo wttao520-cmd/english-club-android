@@ -12,21 +12,33 @@ from kivy.uix.widget import Widget
 
 from core import db
 from core.phonics_data import FAMILY_SENTENCES, GROUPS
-from .theme import (ACCENT, BORDER, CARD, FONT_NAME, GREEN, MUTED, TEXT,
-                    YELLOW, AppLabel, AppTextInput, PrimaryButton, TitleLabel,
-                    rgba)
+from .theme import (ACCENT, BORDER, CARD, FONT_NAME, GREEN, IPA_FONT_NAME,
+                    MUTED, TEXT, YELLOW, AppLabel, AppTextInput, MixedFontLabel,
+                    PrimaryButton, TitleLabel, rgba)
 from .widgets import TypingBoard
 
 CARD_BG = rgba("#1c2230")
 
 
-def _card(title, color=ACCENT, size=sp(22)):
+def _card(title, color=ACCENT, size=sp(22), ipa=""):
+    """卡片容器：标题用主字体；ipa 非空时用 IPA 专用字体单独一行显示。
+
+    主字体子集缺少部分国际音标字形（ŋ ɔ ə ʃ 等），若与中文混排会显示方块，
+    故音标必须用 IPAFont 渲染。
+    """
     box = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(6),
                     size_hint_y=None)
     box.bind(minimum_height=box.setter("height"))
     box.add_widget(AppLabel(text="[color=%s][b]%s[/b][/color]" % (color, title),
                             font_size=size, size_hint_y=None, height=dp(30),
                             halign="left"))
+    if ipa:
+        from kivy.uix.label import Label as KLabel
+        box.add_widget(KLabel(
+            text=ipa, font_name=IPA_FONT_NAME, font_size=sp(20),
+            color=rgba(YELLOW), size_hint_y=None, height=dp(28),
+            halign="left", valign="middle",
+            text_size=(dp(400), dp(28))))
     with box.canvas.before:
         from kivy.graphics import Color as GColor
         from kivy.graphics import RoundedRectangle
@@ -106,12 +118,10 @@ class PhonicsScreen(Screen):
         return sv
 
     def _entry_card(self, e):
-        card = _card("%s  [color=%s]%s[/color]" % (e["g"], YELLOW, e["ipa"]))
-        note = AppLabel(text=e["note"], font_size=sp(12), color=rgba(MUTED),
-                        size_hint_y=None, halign="left")
-        note.bind(width=lambda o, w: setattr(o, "text_size", (w, None)))
-        note.text_size = (dp(300), None)
-        note.height = dp(20)
+        card = _card(e["g"], ipa=e["ipa"])
+        # note 里可能嵌有 /…/ 音标段：用 MixedFontLabel 按字体分段渲染
+        note = MixedFontLabel(text=e["note"], font_size=sp(12),
+                              color=MUTED, size_hint_y=None, height=dp(20))
         card.add_widget(note)
 
         flow = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
@@ -135,14 +145,13 @@ class PhonicsScreen(Screen):
         grid.bind(minimum_height=grid.setter("height"))
         grid.cards = []
         for f in FAMILY_SENTENCES:
-            card = _card("%s  [color=%s]%s[/color]" % (f["g"], YELLOW, f["ipa"]),
-                         color=GREEN, size=sp(18))
+            card = _card(f["g"], color=GREEN, size=sp(18), ipa=f["ipa"])
             en = AppLabel(text=f["en"], font_size=sp(16), size_hint_y=None, height=dp(26),
                           halign="left")
             zh = AppLabel(text=f["zh"], font_size=sp(12), color=rgba(MUTED),
                           size_hint_y=None, height=dp(20), halign="left")
-            note = AppLabel(text=f["note"], font_size=sp(11), color=rgba(MUTED),
-                            size_hint_y=None, height=dp(18), halign="left")
+            note = MixedFontLabel(text=f["note"], font_size=sp(11),
+                                  color=MUTED, size_hint_y=None, height=dp(18))
             for w in (en, zh, note):
                 w.text_size = (dp(420), None)
                 card.add_widget(w)
@@ -192,8 +201,9 @@ class PhonicsScreen(Screen):
         rows = db.sentences_by_en([w[0] for w in e["words"]])
         if not rows:
             return
+        # 标题只放字母组合（IPA 用主字体渲染会变方块，不放进标题）
         App.get_running_app().start_sentences(
-            [dict(r) for r in rows], "%s %s 拼写" % (e["g"], e["ipa"]), "phonics")
+            [dict(r) for r in rows], "%s 拼写" % e["g"], "phonics")
 
     def _practice_family(self, f):
         rows = db.sentences_by_en([f["en"]])

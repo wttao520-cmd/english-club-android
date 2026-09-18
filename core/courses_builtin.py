@@ -537,11 +537,12 @@ def seed():
     """
     from . import phonics_data
     from .vocab_primary import VOCAB_COURSES
+    from .sentences_xqh import GROUPS as XQH_SENTENCES
 
     conn = db.connect()
     exist = {r["builtin_key"] for r in conn.execute("SELECT builtin_key FROM courses").fetchall()}
     conn.close()
-    for c in list(COURSES) + list(VOCAB_COURSES):
+    for c in list(COURSES) + list(VOCAB_COURSES) + list(XQH_SENTENCES):
         if c["key"] in exist:
             row = db.get_course_by_key(c["key"])
             have = db.count_sentences(row["id"])
@@ -552,6 +553,34 @@ def seed():
         db.add_sentences(cid, c["items"])
     phonics_data.seed()
     refresh_vocab_notes()
+    fix_legacy_text()
+
+
+# 旧数据里出现的「字体缺失」字符 → 统一替换为可用字形，避免升级后仍显示方块
+_CHAR_FIXES = {
+    "隻": "只",   # 繁体「隻」不在简体子集中
+}
+
+
+def fix_legacy_text():
+    """修正旧数据里的缺字形/繁体字符（增量升级时对已存在句子生效）。"""
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT id, en, zh FROM sentences").fetchall()
+        for r in rows:
+            en, zh = r["en"] or "", r["zh"] or ""
+            new_en, new_zh = en, zh
+            for bad, good in _CHAR_FIXES.items():
+                if bad in new_en:
+                    new_en = new_en.replace(bad, good)
+                if bad in new_zh:
+                    new_zh = new_zh.replace(bad, good)
+            if new_en != en or new_zh != zh:
+                conn.execute("UPDATE sentences SET en=?, zh=? WHERE id=?",
+                             (new_en, new_zh, r["id"]))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def refresh_vocab_notes():
