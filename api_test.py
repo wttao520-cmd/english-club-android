@@ -624,6 +624,60 @@ def _():
             assert phoneme_sound(e).strip(), "%s %s 无示范读音" % (e["g"], e["ipa"])
     # 页面已为音素组构建卡片（tab_list 有内容，且卡片工厂带喇叭）
     assert ph.tabs.tab_list, "拼读页未构建任何 tab"
+
+    # 提示条必须走 MixedFontLabel：主字体子集没有 ʃ ɪ ŋ 等字形，
+    # 用普通 Label 会显示方块（回归：提示条曾用 AppLabel）。
+    from ui.theme import (FONT_NAME, IPA_FONT_NAME, MixedFontLabel,
+                          _IPA_CHARS)
+    ph._flash("跟读：%s %s" % (entry["ipa"], want))
+    assert isinstance(ph.flash_lbl, MixedFontLabel), \
+        "跟读提示条必须是 MixedFontLabel，否则音标会显示方块"
+    segs = MixedFontLabel.split_segments(ph.flash_lbl_text())
+    ipa_part = [s for s, is_ipa in segs if is_ipa]
+    assert ipa_part, "提示条文本未切出 IPA 段：%r" % (segs,)
+    assert any(ch in "".join(ipa_part) for ch in entry["ipa"]), \
+        "提示条的音标 %r 未被 IPA 字体渲染" % entry["ipa"]
+    # 每个 IPA 段里的字符都必须能由 IPA 字体渲染（非 ASCII 纯音标字符）
+    for seg in ipa_part:
+        for ch in seg:
+            if ch in _IPA_CHARS:
+                continue
+            assert ch in "/" or ch.isascii(), \
+                "%r 落在 IPA 段但主字体与 IPA 字体都无字形" % ch
+    # IPA 字体必须真的比主字体多出这些字形
+    assert IPA_FONT_NAME != FONT_NAME
+
+    # 全量回归：拼读内容里所有文本按分段结果渲染，都不允许出现缺字形
+    # （回归：note「长音：food / moon；短音 /ʊ/：book / look」曾把
+    #  两个斜杠之间的中文误判为音标段，中文在 IPA 字体下变方块）
+    from ui.theme import _IPA_ALLOWED
+    root = os.path.dirname(os.path.abspath(__file__))
+    font_paths = {
+        FONT_NAME: os.path.join(root, "assets/fonts/NotoSansSC-Subset.otf"),
+        IPA_FONT_NAME: os.path.join(root, "assets/fonts/IPAFont-Subset.ttf"),
+    }
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        TTFont = None
+    if TTFont and all(os.path.exists(p) for p in font_paths.values()):
+        cmaps = {k: set(TTFont(v).getBestCmap())
+                 for k, v in font_paths.items()}
+        texts = []
+        for g in GROUPS:
+            for e in g["entries"]:
+                texts += [e["note"], e["ipa"]]
+        for f in FAMILY_SENTENCES:
+            texts += [f["note"], f["ipa"], f["en"], f["zh"]]
+        for txt in texts:
+            for seg, is_ipa in MixedFontLabel.split_segments(txt):
+                cmap = cmaps[IPA_FONT_NAME if is_ipa else FONT_NAME]
+                miss = [c for c in seg if ord(c) not in cmap and c not in " \t"]
+                assert not miss, \
+                    "%r 的片段 %r 用%s字体缺字形 %r" % (
+                        txt, seg, "IPA" if is_ipa else "主", "".join(miss))
+    assert _IPA_ALLOWED, "IPA 允许字符集为空"
+
     print("SMOKE OK  phonics-speaker entry=%s ipa=%s spoken=%r"
           % (entry["g"], entry["ipa"], spoken))
 

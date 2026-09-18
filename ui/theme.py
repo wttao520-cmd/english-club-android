@@ -190,10 +190,15 @@ class AppLabel(Label):
 
 
 _IPA_SEG = re.compile(r"(/[^/\n]{0,24}/)")
+# 国际音标字符（含重音/长音符号与「同上」符号）。
+_IPA_CHARS = set("ʃʒθðŋɜɑɔəʊɪʌæɒɐɘɵɛɨøœɣβɸχɯɰɴʙɢʀʜʟɦɬɮʋɾɽʂʐʝɟɡɱɳɶɹɺɻʞʇʈˌˈːˑ")
+# 音标字母里会出现、但普通英文也大量使用的字符（IPA 与拉丁字母重叠区）
+_IPA_ASCII = set("abcdefghijklmnopqrstuvwxyz")
+_IPA_ALLOWED = _IPA_CHARS | _IPA_ASCII | set(" /")
 
 
 class MixedFontLabel(BoxLayout):
-    """把文本按字体分段渲染：形如 /…/ 的音标段用 IPA 字体，其余用主字体。
+    """把文本按字体分段渲染：音标部分用 IPA 字体，其余用主字体。
 
     主字体子集不含部分国际音标字形（ɪ ə ʊ ɔ ʃ ː ˈ 等），混排会显示方块；
     Kivy 的 Label 不支持一行内多种字体，故把文本切成若干段，
@@ -201,7 +206,6 @@ class MixedFontLabel(BoxLayout):
     """
 
     def __init__(self, text="", font_size=None, color=MUTED, **kw):
-        from kivy.uix.label import Label as KLabel
         kw.setdefault("orientation", "horizontal")
         kw.setdefault("spacing", 0)
         kw.setdefault("size_hint_y", None)
@@ -213,19 +217,59 @@ class MixedFontLabel(BoxLayout):
         self.bind(width=self._reflow)
         self.bind(minimum_height=self.setter("height"))
 
+    @staticmethod
+    def split_segments(text):
+        """把文本切成 [(片段, 是否用 IPA 字体), ...]。
+
+        注意不能只靠「/…/ 包裹」判定音标：note 里写成
+        「长音：food / moon；短音 /ʊ/：book / look」时，正则会把两个斜杠
+        之间的「moon；短音」也当成音标，交给 IPA 字体渲染 → 中文变方块。
+        因此只有**内容里不含非 IPA 字符**的 /…/ 才算音标段。
+        """
+        out = []
+        for part in _IPA_SEG.split(text):
+            if not part:
+                continue
+            if _IPA_SEG.fullmatch(part) and MixedFontLabel._is_ipa_only(part):
+                out.append((part, True))
+                continue
+            out.extend(MixedFontLabel._split_by_char(part))
+        return out
+
+    @staticmethod
+    def _is_ipa_only(seg):
+        """判断一段文本（可含首尾斜杠）是否纯由音标字符构成。"""
+        return all(ch in _IPA_ALLOWED for ch in seg)
+
+    @staticmethod
+    def _split_by_char(part):
+        """把一段文本按「是否含 IPA 字符」切成连续片段。"""
+        out = []
+        buf = []
+        cur = None
+        for ch in part:
+            want = ch in _IPA_CHARS
+            if cur is None or want == cur:
+                buf.append(ch)
+                cur = want
+            else:
+                out.append(("".join(buf), cur))
+                buf = [ch]
+                cur = want
+        if buf:
+            out.append(("".join(buf), bool(cur)))
+        return out
+
     def _set_segments(self, text):
         from kivy.uix.label import Label as KLabel
         self.clear_widgets()
         self._lbls = []
-        parts = _IPA_SEG.split(text)
-        for p in parts:
-            if not p:
-                continue
-            is_ipa = bool(_IPA_SEG.fullmatch(p))
-            lbl = KLabel(text=p,
+        for seg, is_ipa in self.split_segments(text):
+            lbl = KLabel(text=seg,
                          font_name=(IPA_FONT_NAME if is_ipa else FONT_NAME),
                          font_size=self._fs, color=rgba(self._color),
-                         size_hint=(None, None), halign="left", valign="top")
+                         size_hint=(None, None), halign="left", valign="top",
+                         markup=False)
             lbl.texture_update()
             lbl.width = lbl.texture_size[0]
             lbl.height = lbl.texture_size[1]

@@ -176,12 +176,14 @@ class PhonicsScreen(Screen):
         head.add_widget(self.search)
         root.add_widget(head)
 
-        # 跟读提示条：点击「♫ 跟读」后说明听到的是哪个音（自动隐藏）
-        self.flash_lbl = AppLabel(text="", font_size=sp(12),
-                                  size_hint_y=None, height=dp(20),
-                                  halign="left")
+        # 跟读提示条：点击「♫ 跟读」后说明听到的是哪个音（自动隐藏）。
+        # 必须用 MixedFontLabel——提示里含 /ʃ/ /ɪ/ 等音标，主字体子集没有
+        # 这些字形，用普通 Label 会显示成方块。
+        self.flash_lbl = MixedFontLabel(text="", font_size=sp(12),
+                                        color=ACCENT, size_hint_y=None)
         root.add_widget(self.flash_lbl)
         self._flash_ev = None
+        self._flash_text = ""
 
         self.tabs = TabbedPanel(do_default_tab=False, tab_width=dp(140),
                                 tab_height=dp(42),
@@ -325,17 +327,27 @@ class PhonicsScreen(Screen):
         self._say(word)
 
     def _flash(self, text):
-        """在搜索框下方显示一行跟读提示（1.6s 后恢复原提示）。"""
+        """在搜索框下方显示一行跟读提示（1.6s 后自动清空）。"""
         lbl = getattr(self, "flash_lbl", None)
         if lbl is None:
             return
-        lbl.text = "[color=%s]%s[/color]" % (ACCENT, text)
+        self._flash_text = text
+        lbl.set_text(text)
         ev = getattr(self, "_flash_ev", None)
         if ev is not None:
             ev.cancel()
         from kivy.clock import Clock
-        self._flash_ev = Clock.schedule_once(
-            lambda dt: setattr(lbl, "text", ""), 1.6)
+        self._flash_ev = Clock.schedule_once(self._clear_flash, 1.6)
+
+    def _clear_flash(self, *a):
+        self._flash_text = ""
+        lbl = getattr(self, "flash_lbl", None)
+        if lbl is not None:
+            lbl.set_text("")
+
+    def flash_lbl_text(self):
+        """当前提示条文本（供测试断言）。"""
+        return getattr(self, "_flash_text", "")
 
     def _toast(self, text):
         from kivy.uix.popup import Popup
