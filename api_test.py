@@ -559,6 +559,75 @@ def _():
     assert got2.get("ok") == 2
 
 
+@case("拼读页音素卡片：跟读按钮存在且读的是该音素的纯音示范词")
+def _():
+    from main import EnglishClubApp
+    app = EnglishClubApp()
+    app.build()
+    ph = app.screens("phonics")
+    ph.refresh()
+    assert ph.tabs.tab_list, "拼读页没有 tab"
+
+    def _buttons(w):
+        # PrimaryButton 继承 ButtonBehavior+BoxLayout，并不继承 uix.button.Button，
+        # 故用「是否有 text 属性」判断，兼容所有按钮类。
+        out = []
+        if hasattr(w, "text") and w.text:
+            out.append(w)
+        for c in getattr(w, "children", []):
+            out.extend(_buttons(c))
+        return out
+
+    # 直接检查卡片工厂产物：确认音素卡片含「跟读」按钮并能朗读
+    from ui.phonics_screen import _card as make_card
+    from ui.phonics_screen import phoneme_sound
+    entry = None
+    for g in ph.groups:
+        for e in g["entries"]:
+            if e.get("ipa") and e.get("words"):
+                entry = e
+                break
+        if entry:
+            break
+    assert entry, "未找到带音标的音素条目"
+    spoken = []
+    ph.ctx.speaker.say = lambda t: spoken.append(t)
+    card = make_card(entry["g"], ipa=entry["ipa"],
+                     on_say=lambda: ph._say_phoneme(entry))
+    horns = [b for b in _buttons(card) if "跟读" in (b.text or "")]
+    assert horns, "音素卡片未生成「跟读」喇叭按钮"
+    horns[0].dispatch("on_release")
+    want = phoneme_sound(entry)
+    assert spoken == [want], \
+        "跟读应朗读纯音示范词 %r，实际 %r" % (want, spoken)
+    assert want != entry["words"][0][0], \
+        "跟读读的是纯音示范词，不应等于整词 %r" % want
+
+    # 关键音素必须命中"纯音"表，而不是退化成整词
+    # （/æ/→at 而非 apple；/ʃ/→shh 而非 ship）
+    from core.phonics_data import GROUPS, FAMILY_SENTENCES
+    expect = {"/æ/": "at", "/ʌ/": "up", "/ʃ/": "shh", "/θ/": "think",
+              "/iː/": "see", "/eɪ/": "say", "/ŋ/": "sing"}
+    seen = {}
+    for g in GROUPS:
+        for e in g["entries"]:
+            seen.setdefault(e["ipa"], set()).add(phoneme_sound(e))
+    for ipa, want in expect.items():
+        assert ipa in seen, "缺少音素 %s" % ipa
+        assert want in seen[ipa], \
+            "%s 应由纯音表给 %r，实际 %r" % (ipa, want, sorted(seen[ipa]))
+    for f in FAMILY_SENTENCES:
+        assert phoneme_sound(f), "词族 %s 取不到示范读音" % f["g"]
+    # 每个音素都必须有可读文本（不允许空串）
+    for g in GROUPS:
+        for e in g["entries"]:
+            assert phoneme_sound(e).strip(), "%s %s 无示范读音" % (e["g"], e["ipa"])
+    # 页面已为音素组构建卡片（tab_list 有内容，且卡片工厂带喇叭）
+    assert ph.tabs.tab_list, "拼读页未构建任何 tab"
+    print("SMOKE OK  phonics-speaker entry=%s ipa=%s spoken=%r"
+          % (entry["g"], entry["ipa"], spoken))
+
+
 # ---------------------------------------------------------------- 汇总
 print("\n" + "=" * 56)
 print("通过 %d 项，失败 %d 项" % (len(PASS), len(FAIL)))
