@@ -39,6 +39,37 @@ def rgba(hex_color, a=1.0):
     return (r, g, b, a)
 
 
+# ------------------------------------------------------------------ 屏幕自适应
+# 手机基准宽度（与 main.py 的桌面预览窗口一致）
+BASE_WIDTH_DP = 420.0
+
+
+def ui_scale():
+    """按屏幕（窗口）宽度算出的 UI 缩放系数。
+
+    手机（≈420dp 宽）返回 1.0；平板/大屏按比例放大，上限 2.2 避免过大。
+    以「dp 宽度」为基准，因此不随像素密度重复放大。
+    """
+    try:
+        from kivy.core.window import Window
+        w = Window.width / dp(1)
+        if w <= 0:
+            return 1.0
+        return max(1.0, min(2.2, w / BASE_WIDTH_DP))
+    except Exception:
+        return 1.0
+
+
+def ssp(size):
+    """自适应字号：主题字号 × 屏幕缩放（在 sp 基础上再按屏幕宽度放大）。"""
+    return sp(size * ui_scale())
+
+
+def sdp(size):
+    """自适应尺寸：dp × 屏幕缩放（仅用于选词板等需要随屏放大的地方）。"""
+    return dp(size * ui_scale())
+
+
 # ------------------------------------------------------------------ 字体
 FONT_NAME = "AppFont"
 IPA_FONT_NAME = "IPAFont"  # 国际音标专用（中文子集字体无 IPA 字形）

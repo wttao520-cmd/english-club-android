@@ -80,13 +80,13 @@ class PetPopup(Popup):
             halign="center"))
         root.add_widget(info)
 
-        # 喂养按钮
+        # 喂养按钮：参数为「喂养次数」（-1 表示喂到升级）
         feed_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-        for label, cost, bg in [("喂 1 次\n10 分", 10, PANEL2),
-                                ("喂 5 次\n50 分", 50, PANEL2),
-                                ("喂到升级", -1, BLUE)]:
+        for label, times, bg in [("喂 1 次\n10 分", 1, PANEL2),
+                                 ("喂 5 次\n50 分", 5, PANEL2),
+                                 ("喂到升级", -1, BLUE)]:
             b = PrimaryButton(text=label, font_size=sp(13), bg=rgba(bg))
-            b.bind(on_release=lambda x, c=cost: self._feed(c))
+            b.bind(on_release=lambda x, c=times: self._feed(c))
             feed_row.add_widget(b)
         root.add_widget(feed_row)
 
@@ -165,19 +165,37 @@ class PetPopup(Popup):
 
     def _feed(self, count):
         st = self.state
-        pts = db.get_points()
         cost_each = 10
-        if count == -1:
-            # 喂到升级：估算需要多少次
-            need_exp = st.need - st.exp_in_level
-            count = max(1, -(-need_exp // cost_each))  # 向上取整
-        count = min(count, pts // cost_each)
-        if count <= 0:
-            self.msg.text = "[color=%s]积分不足：练习和复习都能赚积分哦[/color]" % RED
+        # 满级后不再消耗积分（否则会白扣分而无任何收益）
+        if st.level >= pet_mod.MAX_LEVEL or st.need <= 0:
+            self.msg.text = "[color=%s]%s 已经满级啦，不用再喂了～[/color]" % (
+                YELLOW, st.name)
             self.msg.markup = True
             return
-        db.add_points(-count * cost_each)
-        level_up, old_stage, _new_stage = st.add_exp(count * cost_each)
+        pts = db.get_points()
+        if count == -1:
+            # 喂到升级：当前级还差多少经验，按 1 分 = 1 经验换算所需次数
+            need_exp = st.need - st.exp_in_level
+            want = max(1, -(-need_exp // cost_each))   # 向上取整
+            if pts < want * cost_each:
+                # 积分不足以喂到升级：明确提示还需多少分，不静默截断
+                self.msg.text = ("[color=%s]喂到升级需要 %d 分，还差 %d 分"
+                                 "（练习/复习赚积分）[/color]"
+                                 % (RED, want * cost_each,
+                                    want * cost_each - pts))
+                self.msg.markup = True
+                return
+            count = want
+        else:
+            if pts < count * cost_each:
+                self.msg.text = ("[color=%s]积分不足：需要 %d 分，还差 %d 分[/color]"
+                                 % (RED, count * cost_each,
+                                    count * cost_each - pts))
+                self.msg.markup = True
+                return
+        deduct = count * cost_each
+        db.add_points(-deduct)
+        level_up, old_stage, _new_stage = st.add_exp(deduct)
         st.save()
         self.pet_view.happy = True
         if level_up:
@@ -188,7 +206,7 @@ class PetPopup(Popup):
             self.msg.markup = True
         else:
             self.msg.text = "[color=%s]%s 吃得很开心（+%d 经验）[/color]" % (
-                GREEN, st.name, count * cost_each)
+                GREEN, st.name, deduct)
             self.msg.markup = True
         self._refresh()
 

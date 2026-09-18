@@ -27,7 +27,7 @@ from core.worker import run_async
 from .theme import (ACCENT, BLUE, CARD, FONT_NAME, GREEN, IPA_FONT_NAME,
                     MUTED, PANEL2, RED, TEXT, YELLOW, AppLabel, AppSpinner,
                     AppSpinnerOption, AppTextInput, PrimaryButton, TitleLabel,
-                    rgba)
+                    rgba, sdp, ssp)
 from .widgets import ComboBadge, PickerPopup, TypingBoard, WordChoiceBoard
 from .pet_screen import PetEntry
 
@@ -159,10 +159,10 @@ class PracticeScreen(Screen):
         row2.add_widget(self.time_lbl)
         root.add_widget(row2)
 
-        # 中文提示（题干）：高度按内容自适应，长句自动多行不截断
-        self.zh_lbl = AppLabel(text="像玩游戏一样，用句子学英语", font_size=sp(19),
+        # 中文提示（题干）：高度按内容自适应，长句自动多行不截断；字号随屏缩放
+        self.zh_lbl = AppLabel(text="像玩游戏一样，用句子学英语", font_size=ssp(19),
                                bold=True, halign="center", size_hint_y=None,
-                               height=dp(48), color=rgba(TEXT))
+                               height=sdp(48), color=rgba(TEXT))
         self.zh_lbl.bind(texture_size=self._sync_zh_height)
         self.zh_lbl.bind(width=self._sync_zh_height)
         root.add_widget(self.zh_lbl)
@@ -174,8 +174,11 @@ class PracticeScreen(Screen):
                              valign="middle")
         root.add_widget(self.ipa_lbl)
 
-        self.note_lbl = AppLabel(text="", font_size=sp(12), color=rgba(MUTED),
+        # 例句/讲解：高度随内容自适应（多行不再溢出遮挡打字板），上限 4 行
+        self.note_lbl = AppLabel(text="", font_size=ssp(13), color=rgba(MUTED),
                                  halign="center", size_hint_y=None, height=dp(18))
+        self.note_lbl.bind(texture_size=self._sync_note_height)
+        self.note_lbl.bind(width=self._sync_note_height)
         root.add_widget(self.note_lbl)
 
         # ---------------- 中部答题区（弹性占满剩余空间）----------------
@@ -387,10 +390,27 @@ class PracticeScreen(Screen):
         """题干高度按文字实际行数自适应（长句多行显示，不截断）。"""
         lbl = self.zh_lbl
         try:
-            lbl.text_size = (max(dp(40), lbl.width), None)
-            h = max(dp(40), lbl.texture_size[1] + dp(8))
+            lbl.text_size = (max(sdp(40), lbl.width), None)
+            h = max(sdp(40), lbl.texture_size[1] + sdp(8))
         except Exception:
-            h = dp(48)
+            h = sdp(48)
+        if abs(h - lbl.height) > 1:
+            lbl.height = h
+
+    def _sync_note_height(self, *a):
+        """例句/讲解高度按内容自适应（多行不再溢出遮挡打字板）。
+
+        空间足够时完整显示；最多占答题区的一半高度，保证打字区可用。
+        """
+        lbl = self.note_lbl
+        try:
+            lbl.text_size = (max(sdp(40), lbl.width), None)
+            want = lbl.texture_size[1] + sdp(6)
+            room = getattr(self, "answer_area", None)
+            cap = (room.height * 0.5) if room is not None else sdp(300)
+            h = max(dp(0), min(want, max(sdp(60), cap)))
+        except Exception:
+            h = dp(18)
         if abs(h - lbl.height) > 1:
             lbl.height = h
 

@@ -14,7 +14,7 @@ from kivy.uix.widget import Widget
 
 from .theme import (ACCENT, BLUE, BORDER, CARD, CHUNK_COLORS, FONT_NAME, GREEN,
                     MUTED, PANEL2, RED, TEXT, YELLOW, AppLabel, PrimaryButton,
-                    rgba)
+                    rgba, sdp, ssp, ui_scale)
 
 _TEX_CACHE = {}
 
@@ -341,7 +341,7 @@ class WordTile(PrimaryButton):
 
     def __init__(self, text, on_pick, **kw):
         kw.setdefault("text", text)
-        kw.setdefault("font_size", sp(14))
+        kw.setdefault("font_size", ssp(14))
         kw.setdefault("size_hint", (None, None))
         kw.setdefault("bg", rgba(PANEL2))
         PrimaryButton.__init__(self, **kw)
@@ -373,8 +373,8 @@ class WordChoiceBoard(BoxLayout):
 
         # 已填入区：流式排列（长句自动多行）。这里用普通容器而非 ScrollView，
         # 避免 ScrollView 在内容不超过视口时把子项 y 放到 0 干扰对齐。
-        self._slots_min = dp(88)
-        self.slots = FlowLayout(spacing=dp(5), padding=dp(2), valign="top",
+        self._slots_min = sdp(88)
+        self.slots = FlowLayout(spacing=sdp(5), padding=sdp(2), valign="top",
                                 size_hint=(1, None))
         filled_wrap = BoxLayout(size_hint_y=None, height=self._slots_min)
         filled_wrap.add_widget(self.slots)
@@ -385,7 +385,7 @@ class WordChoiceBoard(BoxLayout):
         # 词库区：流式排列，词块按文字宽度自动换行；
         # 容器撑满剩余空间，valign=bottom 让词块沉到底部（贴近拇指，好点）。
         self.pool_wrap = BoxLayout()
-        self.pool = FlowLayout(spacing=dp(5), padding=dp(2), valign="bottom",
+        self.pool = FlowLayout(spacing=sdp(5), padding=sdp(2), valign="bottom",
                                size_hint=(1, 1))
         self.pool_wrap.add_widget(self.pool)
         self.add_widget(self.pool_wrap)
@@ -394,7 +394,7 @@ class WordChoiceBoard(BoxLayout):
 
     def _sync_slots_height(self, *a):
         """槽位区高度跟随内容（多行时变高，句子长也能看全）。"""
-        need = max(self._slots_min, self.slots.height + dp(8))
+        need = max(self._slots_min, self.slots.height + sdp(8))
         cap = max(self._slots_min, self.height * 0.45)
         h = min(need, cap)
         if abs(h - self._filled_wrap.height) > 1:
@@ -420,21 +420,21 @@ class WordChoiceBoard(BoxLayout):
         self.slots.clear_widgets()
         for i, (w, _sp) in enumerate(self._words):
             if i < placed:
-                t = PrimaryButton(text=w, font_size=sp(14), size_hint=(None, None),
-                                  bg=rgba(GREEN))
-                t.height = dp(38)
+                t = PrimaryButton(text=w, font_size=ssp(15),
+                                  size_hint=(None, None), bg=rgba(GREEN))
+                t.height = sdp(40)
                 t.width = self._btn_width(t, w)
                 t.bind(on_release=lambda b, idx=i: self.on_undo(idx))
                 self.slots.add_widget(t)
             else:
-                chip = PrimaryButton(text="", font_size=sp(14),
-                                     size_hint=(None, None), width=dp(44),
-                                     height=dp(38), bg=rgba("#141922"))
+                chip = PrimaryButton(text="", font_size=ssp(15),
+                                     size_hint=(None, None), width=sdp(46),
+                                     height=sdp(40), bg=rgba("#141922"))
                 self.slots.add_widget(chip)
         if not self._words:
             self.slots.add_widget(AppLabel(
                 text="（本句没有可选的词）", color=rgba(MUTED),
-                size_hint_y=None, height=dp(34)))
+                size_hint_y=None, height=sdp(34)))
 
         # ---- 下排词库：池签名不变时复用已有词块，只切换显隐，位置绝不跳变 ----
         pool = list(pool)
@@ -443,7 +443,7 @@ class WordChoiceBoard(BoxLayout):
             self.pool.clear_widgets()
             for w in pool:
                 tile = WordTile(w, self._tile_pressed)
-                tile.height = dp(36)
+                tile.height = sdp(40)
                 tile.width = self._btn_width(tile, w)
                 self.pool.add_widget(tile)
             self._pool_sig = sig
@@ -470,18 +470,18 @@ class WordChoiceBoard(BoxLayout):
 
     @staticmethod
     def _btn_width(btn, text):
-        """按文字实际宽度自适应按钮宽度，并封顶。
+        """按文字实际宽度自适应按钮宽度，并封顶（随屏幕缩放）。
 
         PrimaryButton 内部的 Label 的 text_size 会跟随按钮尺寸（循环依赖），
         直接用它的 texture_size 会得到错误宽度，故用 CoreLabel 单独量文字。
         """
         try:
-            lbl = CoreLabel(text=text, font_name=FONT_NAME, font_size=sp(14))
+            lbl = CoreLabel(text=text, font_name=FONT_NAME, font_size=ssp(15))
             lbl.refresh()
             tw = lbl.texture.width
         except Exception:
-            tw = dp(len(text) * 8)
-        return min(dp(180), max(dp(34), tw + dp(18)))
+            tw = dp(len(text) * 8 * ui_scale())
+        return min(sdp(260), max(sdp(36), tw + sdp(20)))
 
     def _tile_pressed(self, tile):
         self.on_pick(tile.text, tile)

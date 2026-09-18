@@ -117,8 +117,9 @@ def main():
     for ch in cb.pool.children:
         rowset.setdefault(round(ch.y), []).append(ch.text)
     assert len(rowset) >= 2, "窄视口下词块未换行：%s" % rowset
+    # 词块高度应随屏幕缩放（手机≈40dp，平板更大），只校验未被撑得异常大
     for ch in cb.pool.children:
-        assert ch.height <= 40.0, "词块过高：%s" % ch.height
+        assert ch.height <= 120.0, "词块过高：%s" % ch.height
     # 恢复常见手机宽度再排一次，供后续位置稳定性断言
     cb.pool.width = 380.0
     cb.pool._relayout()
